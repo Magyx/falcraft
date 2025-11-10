@@ -1,25 +1,26 @@
 {
 	"schemaVersion": 1,
-	"id": "modid",
+	"id": "falcraft",
 	"version": "${version}",
-	"name": "Example mod",
-	"description": "This is an example description! Tell everyone what your mod is about!",
+	"name": "Falcraft",
+	"description": "AI-powered texture remixing for Minecraft! Point at any block and remix its texture using Fal AI.",
 	"authors": [
-		"Me!"
+		"Falcraft Team"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"homepage": "https://github.com/blendi-remade/falcraft",
+		"sources": "https://github.com/blendi-remade/falcraft",
+		"issues": "https://github.com/blendi-remade/falcraft/issues"
 	},
 	"license": "CC0-1.0",
 	"icon": "assets/modid/icon.png",
 	"environment": "*",
 	"entrypoints": {
 		"main": [
-			"com.example.ExampleMod"
+			"com.falcraft.ExampleMod"
 		],
 		"client": [
-			"com.example.ExampleModClient"
+			"com.falcraft.FalcraftClient"
 		]
 	},
 	"mixins": [
@@ -34,8 +35,5 @@
 		"minecraft": "~1.21.10",
 		"java": ">=21",
 		"fabric-api": "*"
-	},
-	"suggests": {
-		"another-mod": "*"
 	}
 }

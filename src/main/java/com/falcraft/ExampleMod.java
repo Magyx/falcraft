@@ -1,4 +1,4 @@
-package com.example;
+package com.falcraft;
 
 import net.fabricmc.api.ModInitializer;
 

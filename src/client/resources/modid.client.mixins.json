@@ -1,9 +1,8 @@
 {
 	"required": true,
-	"package": "com.example.mixin.client",
+	"package": "com.falcraft.mixin.client",
 	"compatibilityLevel": "JAVA_21",
 	"client": [
-		"ExampleClientMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
