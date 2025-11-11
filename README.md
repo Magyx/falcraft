@@ -22,40 +22,42 @@ A Fabric mod for Minecraft 1.21.10 that brings AI-powered texture generation dir
 1. **Look at any block** in the game world
 2. **Run the command**: `/fal remix <your creative prompt>`
 3. **Watch the magic happen!** The mod will:
-   - Extract the block's current texture(s)
-   - Send them to Fal AI with your prompt
-   - Apply the remixed texture(s) instantly
+   - Extract the block's texture
+   - Send it to fal with your prompt
+   - Apply the remixed texture instantly
 
 ### Examples
 
 ```
-/fal remix make it glowing alien texture
-/fal remix turn it into mossy ancient ruins
-/fal remix cyberpunk neon style
-/fal remix made of crystal and gems
-/fal remix convert to candy and sweets
+/fal remix glowing alien texture
+/fal remix mossy ancient ruins
+/fal remix cyberpunk neon glowing
+/fal remix made of pure gold shiny
+/fal remix candy and sweets themed
+/fal remix lava texture molten fire
 ```
 
 ## 🚀 Installation
 
 ### For Players
 
-1. **Install Prerequisites**:
-   - [Java 21+](https://adoptium.net/temurin/releases/)
-   - [Minecraft 1.21.10](https://www.minecraft.net/)
-   - [Fabric Loader 0.17.3+](https://fabricmc.net/use/)
-   - [Fabric API 0.136.0+](https://modrinth.com/mod/fabric-api)
+1. **Prerequisites**:
+   - ✅ [Minecraft 1.21.10](https://www.minecraft.net/) (you probably have this!)
+   - ✅ [Java 21+](https://adoptium.net/temurin/releases/) (required for Minecraft 1.21+)
+   - 📦 [Fabric Loader 0.17.3+](https://fabricmc.net/use/) (install if you haven't)
+   - 📦 [Fabric API 0.136.0+](https://modrinth.com/mod/fabric-api) (goes in your mods folder)
 
-2. **Get a Fal AI API Key**:
+2. **Get a fal API Key**:
    - Sign up at [fal.ai](https://fal.ai)
    - Get your API key from the dashboard
 
 3. **Configure the mod**:
-   - Create a `.env` file in your `.minecraft` directory (or `run/` for development)
+   - Create a `.env` file in your `.minecraft` directory
    - Add your API key:
      ```
      FAL_API_KEY=your_api_key_here
      ```
+   - For development: place `.env` in the `run/` directory
 
 4. **Install the mod**:
    - Download the latest release from [Releases](https://github.com/blendi-remade/falcraft/releases)
@@ -64,17 +66,17 @@ A Fabric mod for Minecraft 1.21.10 that brings AI-powered texture generation dir
 
 ### For Developers
 
-**Requirements**: [Java 21+](https://adoptium.net/temurin/releases/)
+**Requirements**: [Java 21+](https://adoptium.net/temurin/releases/) (Gradle handles everything else!)
 
 1. **Clone the repository**:
    ```bash
    git clone https://github.com/blendi-remade/falcraft.git
-   cd falcraft/fabric-example-mod
+   cd falcraft
    ```
 
 2. **Set up your API key**:
    ```bash
-   echo "FAL_API_KEY=your_api_key_here" > .env
+   echo "FAL_API_KEY=your_api_key_here" > run/.env
    ```
 
 3. **Run the development client**:
@@ -104,14 +106,14 @@ Falcraft uses a sophisticated pipeline to seamlessly integrate AI texture genera
                    ↓
           ┌────────────────────────┐
           │ ClientTextureGrabber   │  • Raycasts to find target block
-          │                        │  • Extracts ALL block textures
-          └────────┬───────────────┘  • Saves as temporary PNGs
+          │                        │  • Extracts block texture
+          └────────┬───────────────┘  • Saves as temporary PNG
                    ↓
           ┌────────────────────────┐
-          │ FalAPI                 │  • Converts images to base64
-          │                        │  • Submits to Fal AI queue
+          │ FalAPI                 │  • Converts image to base64
+          │                        │  • Submits to fal queue
           └────────┬───────────────┘  • Polls for completion
-                   ↓                  • Downloads remixed PNGs
+                   ↓                  • Downloads remixed PNG
           ┌────────────────────────┐
           │ PackIO                 │  • Writes to dynamic resource pack
           │                        │  • Hot-reloads Minecraft resources
@@ -151,8 +153,8 @@ src/
 ### Technologies Used
 
 - **Fabric API**: Modern Minecraft modding framework
-- **Fal AI**: Nano-banana/edit model for image-to-image generation
-- **Java 21**: Modern Java features (HttpClient, records, pattern matching)
+- **fal**: Nano-banana/edit model for image-to-image generation
+- **Java 21**: Modern Java features (HttpClient, pattern matching)
 - **Dynamic Resource Packs**: Hot-reload textures without restart
 - **Reflection**: Access Minecraft's internal texture data
 
@@ -160,16 +162,15 @@ src/
 
 - **Thread-Safe UI Updates**: All chat messages scheduled on main thread
 - **Async Processing**: API calls run on background threads
-- **Queue-Based Processing**: Implements Fal's queue workflow (submit → poll → fetch)
-- **Multi-Texture Detection**: Uses BakedModel quads to find all block textures
+- **Queue-Based Processing**: Implements fal's queue workflow (submit → poll → fetch)
 - **Automatic Resource Pack Management**: Creates and enables pack dynamically
 
 ### Performance
 
-- ⏱️ **Texture Remix Time**: 5-20 seconds (depends on Fal AI queue)
+- ⏱️ **Texture Remix Time**: 5-20 seconds (depends on fal queue)
 - 🎮 **Game Impact**: Zero! All heavy processing is async
 - 💾 **Memory Usage**: Minimal - temporary files cleaned up automatically
-- 🔄 **Reload Time**: < 1 second for resource pack hot-reload
+- 🔄 **Reload Time**: <1 second for resource pack hot-reload
 
 ## 🤝 Contributing
 
@@ -177,7 +178,8 @@ Contributions are welcome! Here are some ideas:
 
 - [ ] Add texture history/undo functionality
 - [ ] Implement preset prompt templates
-- [ ] Support for entity/item textures
+- [ ] Support for entity textures (partially implemented)
+- [ ] Support for item textures
 - [ ] Batch remix multiple blocks
 - [ ] GUI for easier prompt input
 - [ ] Texture gallery/sharing system
@@ -205,7 +207,7 @@ FAL_API_KEY=your_key_here
 
 ### "You must be looking at a block" Error
 
-**Solution**: Make sure your crosshair is pointing directly at a block (not air or entities)
+**Solution**: Make sure your crosshair is pointing directly at a block (not air)
 
 ### Texture Doesn't Change
 
@@ -237,8 +239,8 @@ Feel free to:
 
 Built with:
 - [Fabric](https://fabricmc.net/) - Modern Minecraft modding framework
-- [Fal AI](https://fal.ai/) - AI model infrastructure
-- [Mojang Mappings](https://github.com/FabricMC/Mixin) - For Minecraft code access
+- [fal](https://fal.ai/) - AI model infrastructure
+- [Mojang Mappings](https://github.com/FabricMC/yarn) - For Minecraft code access
 
 Special thanks to the Fabric community for excellent documentation and tools!
 
@@ -251,10 +253,11 @@ Special thanks to the Fabric community for excellent documentation and tools!
 ## 🔮 Future Plans
 
 - Support for more AI models
+- Entity texture support (fix detection issues)
 - Texture animation support
 - Multiplayer sync (server-side texture distribution)
 - Texture marketplace/sharing
-- Integration with more Fal AI models (text-to-texture, style transfer, etc.)
+- Integration with more fal models (text-to-texture, style transfer, etc.)
 
 ---
 

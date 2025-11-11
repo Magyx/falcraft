@@ -32,8 +32,8 @@ Feature suggestions are welcome! Please provide:
 2. **Set up** your development environment:
    ```bash
    git clone https://github.com/blendi-remade/falcraft.git
-   cd falcraft/fabric-example-mod
-   echo "FAL_API_KEY=your_key" > .env
+   cd falcraft
+   echo "FAL_API_KEY=your_key" > run/.env
    ./gradlew runClient
    ```
 

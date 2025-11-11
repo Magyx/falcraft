@@ -1,8 +1,8 @@
 # Environment Setup
 
-## Required: Fal AI API Key
+## Required: fal API Key
 
-Falcraft requires a Fal AI API key to function. Here's how to set it up:
+Falcraft requires a fal API key to function. Here's how to set it up:
 
 ### 1. Get Your API Key
 
@@ -17,7 +17,7 @@ Create a file named `.env` in one of these locations:
 
 **For Development:**
 ```
-fabric-example-mod/.env
+falcraft/run/.env
 ```
 
 **For Production (Players):**
@@ -49,14 +49,14 @@ Start Minecraft with the mod and check the logs:
 
 **✅ Success:**
 ```
-[FalAPI] ✓ Loaded API key from .env file
-[FalAPI] Fal API key loaded successfully
+[FalAPI] ✓ Loaded API key from .env file: /path/to/.env
+[FalAPI] fal API key loaded successfully
 ```
 
 **❌ Error:**
 ```
 [FalAPI] ✗ .env file not found at: /path/to/.env
-[FalAPI] FAL_API_KEY not found! Please set it in .env file
+[FalAPI] FAL_API_KEY not found! Please set it in .env file or as environment variable.
 ```
 
 ## Security Notes
@@ -91,8 +91,8 @@ export FAL_API_KEY="your_key_here"
 
 ### Key Not Loading
 
-1. **Check file location** - `.env` must be in `.minecraft/` or `fabric-example-mod/`
-2. **Check file name** - must be exactly `.env` (not `env.txt` or `.env.txt`)
+1. **Check file location** - `.env` must be in `.minecraft/` or `run/` (for development)
+2. **Check file name** - must be exactly `.env` (not `env.txt` or `.env.txt`)  
 3. **Check format** - must be `FAL_API_KEY=value` (no spaces around `=`)
 4. **Check permissions** - file must be readable
 5. **Restart Minecraft** - changes require restart
