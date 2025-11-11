@@ -41,6 +41,7 @@ A Fabric mod for Minecraft 1.21.10 that brings AI-powered texture generation dir
 ### For Players
 
 1. **Install Prerequisites**:
+   - [Java 21+](https://adoptium.net/temurin/releases/)
    - [Minecraft 1.21.10](https://www.minecraft.net/)
    - [Fabric Loader 0.17.3+](https://fabricmc.net/use/)
    - [Fabric API 0.136.0+](https://modrinth.com/mod/fabric-api)
@@ -62,6 +63,8 @@ A Fabric mod for Minecraft 1.21.10 that brings AI-powered texture generation dir
    - Launch Minecraft with the Fabric profile
 
 ### For Developers
+
+**Requirements**: [Java 21+](https://adoptium.net/temurin/releases/)
 
 1. **Clone the repository**:
    ```bash
