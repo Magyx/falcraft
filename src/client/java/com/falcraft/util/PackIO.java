@@ -53,7 +53,7 @@ public class PackIO {
             JsonObject packMeta = new JsonObject();
             JsonObject pack = new JsonObject();
             pack.addProperty("pack_format", 48); // Minecraft 1.21.10 format
-            pack.addProperty("description", "Fal AI Generated Textures");
+            pack.addProperty("description", "fal Generated Textures");
             packMeta.add("pack", pack);
             
             String packMetaJson = GSON.toJson(packMeta);

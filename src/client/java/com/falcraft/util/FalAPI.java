@@ -33,7 +33,7 @@ public class FalAPI {
             throw new IllegalStateException("FAL_API_KEY is required. Create a .env file in the Minecraft directory with: FAL_API_KEY=your-key-here");
         }
         
-        LOGGER.info("Fal API key loaded successfully");
+        LOGGER.info("fal API key loaded successfully");
     }
     
     /**
@@ -121,7 +121,7 @@ public class FalAPI {
     }
 
     /**
-     * Uploads a texture PNG file and remixes it using the Fal nano-banana/edit endpoint
+     * Uploads a texture PNG file and remixes it using the fal nano-banana/edit endpoint
      * @param textureFile The PNG file to remix
      * @param prompt The text prompt describing the desired edits
      * @return The remixed PNG as a byte array
@@ -149,7 +149,7 @@ public class FalAPI {
         requestBody.addProperty("output_format", "png");
         
         String requestBodyJson = GSON.toJson(requestBody);        
-        LOGGER.info("Submitting request to Fal queue...");
+        LOGGER.info("Submitting request to fal queue...");
         
         HttpRequest submitRequest = HttpRequest.newBuilder()
                 .uri(URI.create(FAL_QUEUE_SUBMIT))
@@ -161,8 +161,8 @@ public class FalAPI {
         HttpResponse<String> submitResponse = httpClient.send(submitRequest, HttpResponse.BodyHandlers.ofString());
         
         if (submitResponse.statusCode() != 200) {
-            LOGGER.error("Fal queue submit error: {} - {}", submitResponse.statusCode(), submitResponse.body());
-            throw new IOException("Failed to submit request to Fal queue: " + submitResponse.statusCode());
+            LOGGER.error("fal queue submit error: {} - {}", submitResponse.statusCode(), submitResponse.body());
+            throw new IOException("Failed to submit request to fal queue: " + submitResponse.statusCode());
         }
         
         JsonObject submitJson = GSON.fromJson(submitResponse.body(), JsonObject.class);
@@ -203,7 +203,7 @@ public class FalAPI {
                 if ("COMPLETED".equals(status)) {
                     completed = true;
                 } else if ("FAILED".equals(status)) {
-                    throw new IOException("Fal request failed");
+                    throw new IOException("fal request failed");
                 }
             } else {
                 LOGGER.warn("Unexpected status code {}, continuing to poll...", statusResponse.statusCode());
@@ -227,7 +227,7 @@ public class FalAPI {
         
         if (resultResponse.statusCode() != 200) {
             LOGGER.error("Failed to get result: {} - {}", resultResponse.statusCode(), resultResponse.body());
-            throw new IOException("Failed to get result from Fal");
+            throw new IOException("Failed to get result from fal");
         }
         
         LOGGER.info("Got result, parsing...");

@@ -3,7 +3,7 @@
 	"id": "falcraft",
 	"version": "${version}",
 	"name": "Falcraft",
-	"description": "AI-powered texture remixing for Minecraft! Point at any block and remix its texture using Fal AI.",
+	"description": "AI-powered texture remixing for Minecraft! Point at any block and remix its texture using fal.",
 	"authors": [
 		"Falcraft Team"
 	],
