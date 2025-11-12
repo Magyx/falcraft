@@ -1,274 +1,163 @@
-# 🎨 falcraft - AI-Powered Minecraft Texture Remix Mod
+# 🎨 falcraft - AI-Powered 3D Generation & Texture Remix for Minecraft
 
-A Fabric mod for Minecraft 1.21.10 that brings AI-powered texture generation directly into your game! Point at any block, describe how you want it to look, and watch as AI instantly remixes the texture in real-time.
+A Fabric mod for Minecraft 1.21.1 that brings AI-powered 3D model generation and texture remixing directly into your game! Generate entire 3D structures from text prompts, or remix any block's texture in real-time.
 
 [![GitHub issues](https://img.shields.io/github/issues/blendi-remade/falcraft)](https://github.com/blendi-remade/falcraft/issues)
 [![GitHub stars](https://img.shields.io/github/stars/blendi-remade/falcraft)](https://github.com/blendi-remade/falcraft/stargazers)
-![Minecraft Version](https://img.shields.io/badge/Minecraft-1.21.10-brightgreen)
-![Fabric API](https://img.shields.io/badge/Fabric%20API-0.136.0-blue)
+![Minecraft Version](https://img.shields.io/badge/Minecraft-1.21.1-brightgreen)
+![Fabric API](https://img.shields.io/badge/Fabric%20API-0.107.0-blue)
 ![License](https://img.shields.io/badge/License-CC0-lightgrey)
 
 ## 🎥 See It In Action
 
-Watch as we transform Minecraft blocks in real-time using AI-powered texture generation:
+Watch as we transform Minecraft with AI-powered generation:
 
 [![Watch the Demo](https://img.youtube.com/vi/2xAbEnfF1SM/maxresdefault.jpg)](https://www.youtube.com/watch?v=2xAbEnfF1SM)
 
-> *Point at any block, run `/fal remix <your prompt>`, and watch the magic happen!*
-
 ## ✨ Features
 
-- 🎯 **Point-and-Remix**: Look at any block and remix its texture with a simple command
-- 🤖 **AI-Powered**: Uses Fal AI's nano-banana/edit model for high-quality texture generation
-- ⚡ **Instant Application**: Changes apply immediately via dynamic resource packs - no restart needed!
-- 🔄 **Multi-Texture Support**: Automatically detects and remixes ALL textures for complex blocks (like grass blocks with multiple faces)
-- 🧵 **Non-Blocking**: Runs in background threads so your game stays smooth
-- 💾 **Persistent**: Remixed textures are saved and survive game restarts
+- 🏗️ **3D Model Generation**: Generate complete 3D structures from text prompts
+- 🎨 **Perceptual Color Matching**: Uses LAB color space for human-vision-accurate block selection
+- 🎯 **Texture Remixing**: Point at any block and remix its texture with AI
+- 🤖 **Powered by fal.ai**: Uses Meshy v6 for 3D generation and nano-banana for texture editing
+- ⚡ **Dynamic Resource Packs**: Texture changes apply instantly - no restart needed
+- 🧵 **Non-Blocking**: All processing runs in background threads
 
 ## 🎮 Usage
 
-1. **Look at any block** in the game world
-2. **Run the command**: `/fal remix <your creative prompt>`
-3. **Watch the magic happen!** The mod will:
-   - Extract the block's texture
-   - Send it to fal with your prompt
-   - Apply the remixed texture instantly
+### Generate 3D Models (NEW!)
 
-### Examples
+Create entire structures from text descriptions:
 
+```
+/fal generate <size> <prompt>
+```
+
+**Examples:**
+```
+/fal generate 32 a cute robot
+/fal generate 48 medieval castle with towers
+/fal generate 64 majestic desert palace
+/fal generate 128 ancient dragon statue
+```
+
+**Size Guide:**
+- **16-32**: Fast testing, rough shapes
+- **48**: Balanced detail/speed (recommended)
+- **64**: High detail
+- **96-128**: Maximum detail (slower placement)
+
+**How it works:**
+1. Meshy v6 generates a textured 3D model (5-10 minutes)
+2. Model is voxelized into Minecraft blocks
+3. Colors are mapped using perceptual LAB color space
+4. Structure is placed flat on the ground in your look direction
+
+### Remix Block Textures
+
+Transform existing block textures with AI:
+
+```
+/fal remix <prompt>
+```
+
+**Examples:**
 ```
 /fal remix glowing alien texture
 /fal remix mossy ancient ruins
-/fal remix cyberpunk neon glowing
-/fal remix made of pure gold shiny
-/fal remix candy and sweets themed
-/fal remix lava texture molten fire
+/fal remix cyberpunk neon
 ```
 
-## 🚀 Installation
-
-### For Players
+## 🚀 Quick Start
 
 1. **Prerequisites**:
-   - ✅ [Minecraft 1.21.10](https://www.minecraft.net/) (you probably have this!)
-   - ✅ [Java 21+](https://adoptium.net/temurin/releases/) (required for Minecraft 1.21+)
-   - 📦 [Fabric Loader 0.17.3+](https://fabricmc.net/use/) (install if you haven't)
-   - 📦 [Fabric API 0.136.0+](https://modrinth.com/mod/fabric-api) (goes in your mods folder)
+   - Minecraft 1.21.1 + [Fabric Loader](https://fabricmc.net/use/) + [Fabric API](https://modrinth.com/mod/fabric-api)
+   - [Java 21+](https://adoptium.net/temurin/releases/)
 
-2. **Get a fal API Key**:
-   - Sign up at [fal.ai](https://fal.ai)
-   - Get your API key from the dashboard
+2. **Get API Key**:
+   - Sign up at [fal.ai](https://fal.ai) and get your API key
 
-3. **Configure the mod**:
-   - Create a `.env` file in your `.minecraft` directory
-   - Add your API key:
-     ```
-     FAL_API_KEY=your_api_key_here
-     ```
-   - For development: place `.env` in the `run/` directory
+3. **Configure**:
+   - Create `.env` in `.minecraft/` directory:
+   ```
+   FAL_API_KEY=your_api_key_here
+   ```
 
-4. **Install the mod**:
-   - Download the latest release from [Releases](https://github.com/blendi-remade/falcraft/releases)
-   - Place the JAR file in your `.minecraft/mods/` folder
-   - Launch Minecraft with the Fabric profile
+4. **Install**:
+   - Download from [Releases](https://github.com/blendi-remade/falcraft/releases)
+   - Place JAR in `.minecraft/mods/`
+   - Launch Minecraft!
 
 ### For Developers
 
-**Requirements**: [Java 21+](https://adoptium.net/temurin/releases/) (Gradle handles everything else!)
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/blendi-remade/falcraft.git
-   cd falcraft
-   ```
-
-2. **Set up your API key**:
-   ```bash
-   echo "FAL_API_KEY=your_api_key_here" > run/.env
-   ```
-
-3. **Run the development client**:
-   ```bash
-   ./gradlew runClient
-   ```
-
-4. **Build the mod**:
-   ```bash
-   ./gradlew build
-   ```
-   The compiled JAR will be in `build/libs/`
-
-## 🏗️ How It Works
-
-falcraft uses a sophisticated pipeline to seamlessly integrate AI texture generation into Minecraft:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Player runs: /fal remix make it glowing                    │
-└──────────────────────┬──────────────────────────────────────┘
-                       ↓
-          ┌────────────────────────┐
-          │  RemixCommand          │  Coordinates the entire process
-          │  (Background Thread)   │  Keeps game responsive
-          └────────┬───────────────┘
-                   ↓
-          ┌────────────────────────┐
-          │ ClientTextureGrabber   │  • Raycasts to find target block
-          │                        │  • Extracts block texture
-          └────────┬───────────────┘  • Saves as temporary PNG
-                   ↓
-          ┌────────────────────────┐
-          │ FalAPI                 │  • Converts image to base64
-          │                        │  • Submits to fal queue
-          └────────┬───────────────┘  • Polls for completion
-                   ↓                  • Downloads remixed PNG
-          ┌────────────────────────┐
-          │ PackIO                 │  • Writes to dynamic resource pack
-          │                        │  • Hot-reloads Minecraft resources
-          └────────┬───────────────┘  • No restart needed!
-                   ↓
-          ┌────────────────────────┐
-          │ ✨ Texture Applied!    │
-          └────────────────────────┘
+```bash
+git clone https://github.com/blendi-remade/falcraft.git
+cd falcraft
+echo "FAL_API_KEY=your_key" > run/.env
+./gradlew runClient
 ```
 
-## 📁 Project Structure
+## 🧠 Technical Overview
 
-```
-src/
-├── main/
-│   ├── java/com/falcraft/
-│   │   └── ExampleMod.java           # Main mod entrypoint
-│   └── resources/
-│       ├── fabric.mod.json            # Mod metadata
-│       └── modid.mixins.json          # Mixin configuration
-│
-└── client/
-    ├── java/com/falcraft/
-    │   ├── FalcraftClient.java        # Client entrypoint
-    │   ├── commands/
-    │   │   └── RemixCommand.java      # /fal remix command handler
-    │   └── util/
-    │       ├── ClientTextureGrabber.java  # Extracts block textures
-    │       ├── FalAPI.java                # Fal AI API integration
-    │       └── PackIO.java                # Resource pack management
-    └── resources/
-        └── modid.client.mixins.json   # Client mixin config
-```
+### 3D Generation Pipeline
 
-## 🔧 Technical Details
+1. **Meshy v6 AI** generates textured GLB model from text prompt
+2. **Texture Extraction** pulls embedded textures from GLB binary
+3. **Voxelization** converts smooth mesh into Minecraft block grid
+4. **Perceptual Color Matching** uses LAB color space (matches human vision, not just RGB math)
+5. **Smart Placement** finds ground and places structure flat
 
-### Technologies Used
+### Texture Remixing Pipeline
 
-- **Fabric API**: Modern Minecraft modding framework
-- **fal**: Nano-banana/edit model for image-to-image generation
-- **Java 21**: Modern Java features (HttpClient, pattern matching)
-- **Dynamic Resource Packs**: Hot-reload textures without restart
-- **Reflection**: Access Minecraft's internal texture data
+1. **Raycast** finds target block and extracts texture
+2. **fal nano-banana** remixes texture with your prompt
+3. **Dynamic Resource Pack** applies changes instantly
 
-### Key Features
+### Why LAB Color Space?
 
-- **Thread-Safe UI Updates**: All chat messages scheduled on main thread
-- **Async Processing**: API calls run on background threads
-- **Queue-Based Processing**: Implements fal's queue workflow (submit → poll → fetch)
-- **Automatic Resource Pack Management**: Creates and enables pack dynamically
-
-### Performance
-
-- ⏱️ **Texture Remix Time**: 5-20 seconds (depends on fal queue)
-- 🎮 **Game Impact**: Zero! All heavy processing is async
-- 💾 **Memory Usage**: Minimal - temporary files cleaned up automatically
-- 🔄 **Reload Time**: <1 second for resource pack hot-reload
-
-## 🤝 Contributing
-
-Contributions are welcome! Here are some ideas:
-
-- [ ] Add texture history/undo functionality
-- [ ] Implement preset prompt templates
-- [ ] Support for entity textures (partially implemented)
-- [ ] Support for item textures
-- [ ] Batch remix multiple blocks
-- [ ] GUI for easier prompt input
-- [ ] Texture gallery/sharing system
-
-### Development Setup
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Make your changes
-4. Test thoroughly with `./gradlew runClient`
-5. Commit: `git commit -m 'Add amazing feature'`
-6. Push: `git push origin feature/amazing-feature`
-7. Open a Pull Request
+Instead of simple RGB distance, we use **CIE LAB color space**:
+- Matches how humans actually perceive color differences
+- Prevents bad matches (e.g., red → orange just because RGB distance is small)
+- Uses D65 illuminant for realistic daylight matching
+- Results in more accurate and natural-looking block selection
 
 ## 🐛 Troubleshooting
 
-### "FAL_API_KEY not found" Error
+**"FAL_API_KEY not found"**
+- Create `.env` file in `.minecraft/` directory with `FAL_API_KEY=your_key`
 
-**Solution**: Create a `.env` file in your Minecraft directory:
-```bash
-# On Windows: C:\Users\YourName\AppData\Roaming\.minecraft\.env
-# On Linux/Mac: ~/.minecraft/.env
-FAL_API_KEY=your_key_here
-```
+**Texture doesn't change**
+- Check `logs/latest.log` for API errors
+- Verify API key is valid
+- Press F3+T to force reload
 
-### "You must be looking at a block" Error
+**Model placement issues**
+- Structures place in your horizontal look direction
+- Automatically finds ground and sits flat
+- Ensure you're looking at an area with ground nearby
 
-**Solution**: Make sure your crosshair is pointing directly at a block (not air)
+## 🤝 Contributing
 
-### Texture Doesn't Change
+Ideas welcome! Fork, create a feature branch, test with `./gradlew runClient`, and open a PR.
 
-**Solutions**:
-1. Check logs for API errors: `logs/latest.log`
-2. Verify your API key is valid
-3. Try pressing F3+T to force resource reload
-4. Some modded blocks may not work yet
+**Feature Ideas:**
+- Undo/history for textures and models
+- Preset prompts library
+- Entity/item texture support
+- Model scaling and rotation commands
 
-### Resource Pack Shows as "Incompatible"
+## 📜 License & Credits
 
-**Solution**: Delete the old pack and let the mod regenerate it:
-```bash
-# Delete: .minecraft/resourcepacks/falcraft_generated/pack.mcmeta
-# Then restart Minecraft
-```
+**CC0 1.0 Universal** - Public domain. Use freely, modify, redistribute, no attribution required!
 
-## 📜 License
+Built with [Fabric](https://fabricmc.net/), [fal.ai](https://fal.ai/), and [Mojang Mappings](https://github.com/FabricMC/yarn).
 
-This project is released under the **CC0 1.0 Universal License** - public domain dedication.
+## 📞 Support & Links
 
-Feel free to:
-- ✅ Use commercially
-- ✅ Modify and redistribute
-- ✅ Use in your own projects
-- ✅ No attribution required (but appreciated!)
-
-## 🙏 Credits
-
-Built with:
-- [Fabric](https://fabricmc.net/) - Modern Minecraft modding framework
-- [fal](https://fal.ai/) - AI model infrastructure
-- [Mojang Mappings](https://github.com/FabricMC/yarn) - For Minecraft code access
-
-Special thanks to the Fabric community for excellent documentation and tools!
-
-## 📞 Support
-
-- 🐛 **Bug Reports**: [Open an issue](https://github.com/blendi-remade/falcraft/issues)
-- 💡 **Feature Requests**: [Start a discussion](https://github.com/blendi-remade/falcraft/discussions)
-- 💬 **Questions**: Check existing issues or start a discussion
-
-## 🔮 Future Plans
-
-- Support for more AI models
-- Entity texture support (fix detection issues)
-- Texture animation support
-- Multiplayer sync (server-side texture distribution)
-- Texture marketplace/sharing
-- Integration with more fal models (text-to-texture, style transfer, etc.)
+- 🐛 [Report Issues](https://github.com/blendi-remade/falcraft/issues)
+- 💬 [Discussions](https://github.com/blendi-remade/falcraft/discussions)
+- ⭐ Star the repo if you like it!
 
 ---
 
-**Made with ❤️ and ☕ by the Fabric modding community**
-
-*Transform your Minecraft world, one block at a time!* ✨
+*Transform your Minecraft world with AI!* ✨🏗️
