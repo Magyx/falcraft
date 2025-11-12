@@ -1,4 +1,4 @@
-# 🎨 Falcraft - AI-Powered Minecraft Texture Remix Mod
+# 🎨 falcraft - AI-Powered Minecraft Texture Remix Mod
 
 A Fabric mod for Minecraft 1.21.10 that brings AI-powered texture generation directly into your game! Point at any block, describe how you want it to look, and watch as AI instantly remixes the texture in real-time.
 
@@ -92,7 +92,7 @@ A Fabric mod for Minecraft 1.21.10 that brings AI-powered texture generation dir
 
 ## 🏗️ How It Works
 
-Falcraft uses a sophisticated pipeline to seamlessly integrate AI texture generation into Minecraft:
+falcraft uses a sophisticated pipeline to seamlessly integrate AI texture generation into Minecraft:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
