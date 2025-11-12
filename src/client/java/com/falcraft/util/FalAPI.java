@@ -20,6 +20,7 @@ import java.util.Base64;
 public class FalAPI {
     private static final Logger LOGGER = LoggerFactory.getLogger("FalAPI");
     private static final String FAL_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/nano-banana/edit";
+    private static final String FAL_3D_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/meshy/v6-preview/text-to-3d";
     private static final Gson GSON = new Gson();
     private final HttpClient httpClient;
     private final String apiKey;
@@ -243,6 +244,114 @@ public class FalAPI {
     }
 
     /**
+     * Generates a 3D model from a text prompt using the fal Meshy v6 endpoint
+     * @param prompt The text prompt describing the desired 3D model
+     * @return The GLB file as a byte array
+     * @throws IOException If network operations fail
+     * @throws InterruptedException If the thread is interrupted during polling
+     */
+    public byte[] generateModel(String prompt) throws IOException, InterruptedException {
+        LOGGER.info("Starting 3D model generation with prompt: {}", prompt);
+        
+        // Step 1: Submit the request to the queue
+        JsonObject requestBody = new JsonObject();
+        requestBody.addProperty("prompt", prompt);
+        requestBody.addProperty("mode", "full"); // Use full mode (textured model with proper colors)
+        
+        String requestBodyJson = GSON.toJson(requestBody);
+        LOGGER.info("Submitting 3D generation request to fal queue...");
+        
+        HttpRequest submitRequest = HttpRequest.newBuilder()
+                .uri(URI.create(FAL_3D_QUEUE_SUBMIT))
+                .header("Authorization", "Key " + apiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
+                .build();
+        
+        HttpResponse<String> submitResponse = httpClient.send(submitRequest, HttpResponse.BodyHandlers.ofString());
+        
+        if (submitResponse.statusCode() != 200) {
+            LOGGER.error("fal 3D queue submit error: {} - {}", submitResponse.statusCode(), submitResponse.body());
+            throw new IOException("Failed to submit 3D generation request to fal queue: " + submitResponse.statusCode());
+        }
+        
+        JsonObject submitJson = GSON.fromJson(submitResponse.body(), JsonObject.class);
+        String requestId = submitJson.get("request_id").getAsString();
+        String responseUrl = submitJson.get("response_url").getAsString();
+        String statusUrl = submitJson.get("status_url").getAsString();
+        
+        LOGGER.info("3D generation request submitted with ID: {}", requestId);
+        LOGGER.info("Status URL: {}", statusUrl);
+        LOGGER.info("Response URL: {}", responseUrl);
+        
+        // Step 2: Poll for completion (3D generation takes longer, so increase timeout)
+        LOGGER.info("Polling for 3D generation completion...");
+        
+        boolean completed = false;
+        int attempts = 0;
+        int maxAttempts = 120; // 120 attempts * 5 seconds = 10 minutes max (3D takes longer)
+        
+        while (!completed && attempts < maxAttempts) {
+            Thread.sleep(5000); // Wait 5 seconds between polls (longer for 3D)
+            attempts++;
+            
+            HttpRequest statusRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(statusUrl))
+                    .header("Authorization", "Key " + apiKey)
+                    .GET()
+                    .build();
+            
+            HttpResponse<String> statusResponse = httpClient.send(statusRequest, HttpResponse.BodyHandlers.ofString());
+            
+            // 202 = IN_PROGRESS, 200 = COMPLETED
+            if (statusResponse.statusCode() == 200 || statusResponse.statusCode() == 202) {
+                JsonObject statusJson = GSON.fromJson(statusResponse.body(), JsonObject.class);
+                String status = statusJson.get("status").getAsString();
+                
+                LOGGER.info("Status check {}/{}: {}", attempts, maxAttempts, status);
+                
+                if ("COMPLETED".equals(status)) {
+                    completed = true;
+                } else if ("FAILED".equals(status)) {
+                    throw new IOException("fal 3D generation request failed");
+                }
+            } else {
+                LOGGER.warn("Unexpected status code {}, continuing to poll...", statusResponse.statusCode());
+            }
+        }
+        
+        if (!completed) {
+            throw new IOException("3D generation request timed out after " + maxAttempts + " attempts");
+        }
+        
+        // Step 3: Get the result using the response_url from submit
+        LOGGER.info("Fetching 3D model result from response URL...");
+        
+        HttpRequest resultRequest = HttpRequest.newBuilder()
+                .uri(URI.create(responseUrl))
+                .header("Authorization", "Key " + apiKey)
+                .GET()
+                .build();
+        
+        HttpResponse<String> resultResponse = httpClient.send(resultRequest, HttpResponse.BodyHandlers.ofString());
+        
+        if (resultResponse.statusCode() != 200) {
+            LOGGER.error("Failed to get 3D result: {} - {}", resultResponse.statusCode(), resultResponse.body());
+            throw new IOException("Failed to get 3D result from fal");
+        }
+        
+        LOGGER.info("Got 3D result, parsing...");
+        JsonObject resultJson = GSON.fromJson(resultResponse.body(), JsonObject.class);
+        String glbUrl = resultJson.getAsJsonObject("model_glb")
+                .get("url").getAsString();
+        
+        LOGGER.info("Downloading GLB model from: {}", glbUrl);
+        
+        // Step 4: Download the GLB file
+        return downloadFile(glbUrl);
+    }
+
+    /**
      * Downloads an image from a URL
      * @param imageUrl The URL of the image
      * @return The image as a byte array
@@ -259,6 +368,27 @@ public class FalAPI {
             throw new IOException("Failed to download image from: " + imageUrl);
         }
         
+        return response.body();
+    }
+
+    /**
+     * Downloads a file from a URL
+     * @param fileUrl The URL of the file
+     * @return The file as a byte array
+     */
+    private byte[] downloadFile(String fileUrl) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(fileUrl))
+                .GET()
+                .build();
+        
+        HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+        
+        if (response.statusCode() != 200) {
+            throw new IOException("Failed to download file from: " + fileUrl);
+        }
+        
+        LOGGER.info("Downloaded file: {} bytes", response.body().length);
         return response.body();
     }
 }
