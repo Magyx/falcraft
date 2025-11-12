@@ -24,6 +24,11 @@ public class FalAPI {
     private static final Gson GSON = new Gson();
     private final HttpClient httpClient;
     private final String apiKey;
+    
+    /**
+     * Result containing both the GLB model data and optional texture URL
+     */
+    public record ModelResult(byte[] glbData, String textureUrl) {}
 
     public FalAPI() {
         this.httpClient = HttpClient.newHttpClient();
@@ -246,11 +251,11 @@ public class FalAPI {
     /**
      * Generates a 3D model from a text prompt using the fal Meshy v6 endpoint
      * @param prompt The text prompt describing the desired 3D model
-     * @return The GLB file as a byte array
+     * @return ModelResult containing GLB data and texture URL
      * @throws IOException If network operations fail
      * @throws InterruptedException If the thread is interrupted during polling
      */
-    public byte[] generateModel(String prompt) throws IOException, InterruptedException {
+    public ModelResult generateModel(String prompt) throws IOException, InterruptedException {
         LOGGER.info("Starting 3D model generation with prompt: {}", prompt);
         
         // Step 1: Submit the request to the queue
@@ -345,10 +350,26 @@ public class FalAPI {
         String glbUrl = resultJson.getAsJsonObject("model_glb")
                 .get("url").getAsString();
         
+        // Extract texture URL if available
+        String textureUrl = null;
+        if (resultJson.has("texture_urls")) {
+            JsonArray textureUrls = resultJson.getAsJsonArray("texture_urls");
+            if (!textureUrls.isEmpty()) {
+                JsonObject firstTexture = textureUrls.get(0).getAsJsonObject();
+                if (firstTexture.has("base_color")) {
+                    textureUrl = firstTexture.getAsJsonObject("base_color")
+                            .get("url").getAsString();
+                    LOGGER.info("Found texture URL: {}", textureUrl);
+                }
+            }
+        }
+        
         LOGGER.info("Downloading GLB model from: {}", glbUrl);
         
         // Step 4: Download the GLB file
-        return downloadFile(glbUrl);
+        byte[] glbData = downloadFile(glbUrl);
+        
+        return new ModelResult(glbData, textureUrl);
     }
 
     /**
@@ -376,7 +397,7 @@ public class FalAPI {
      * @param fileUrl The URL of the file
      * @return The file as a byte array
      */
-    private byte[] downloadFile(String fileUrl) throws IOException, InterruptedException {
+    public byte[] downloadFile(String fileUrl) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(fileUrl))
                 .GET()

@@ -33,16 +33,97 @@ public class GLBParser {
      * @param vertices Array of vertex positions (x,y,z,x,y,z,...)
      * @param indices Array of triangle indices
      * @param colors Array of vertex colors (RGB as integers)
+     * @param uvs Array of UV coordinates (u,v,u,v,...), null if no UVs
      */
-    public record MeshData(float[] vertices, int[] indices, int[] colors) {}
+    public record MeshData(float[] vertices, int[] indices, int[] colors, float[] uvs) {}
+    
+    /**
+     * Extracts the embedded texture from a GLB file if present
+     * @param glbData The GLB file as a byte array
+     * @return The texture as a byte array (PNG or JPEG), or null if no embedded texture
+     */
+    public static byte[] extractEmbeddedTexture(byte[] glbData) throws IOException {
+        LOGGER.info("Extracting embedded texture from GLB...");
+        
+        ByteBuffer buffer = ByteBuffer.wrap(glbData);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+        
+        // Parse GLB header
+        int magic = buffer.getInt();
+        if (magic != GLB_MAGIC) {
+            return null;
+        }
+        buffer.getInt(); // version
+        buffer.getInt(); // length
+        
+        // Parse JSON chunk
+        int jsonChunkLength = buffer.getInt();
+        buffer.getInt(); // chunk type
+        
+        byte[] jsonBytes = new byte[jsonChunkLength];
+        buffer.get(jsonBytes);
+        String jsonString = new String(jsonBytes);
+        JsonObject gltf = GSON.fromJson(jsonString, JsonObject.class);
+        
+        // Parse BIN chunk
+        int binChunkLength = buffer.getInt();
+        buffer.getInt(); // chunk type
+        
+        byte[] binData = new byte[binChunkLength];
+        buffer.get(binData);
+        
+        // Check for embedded images
+        if (!gltf.has("images")) {
+            LOGGER.info("No images found in GLB");
+            return null;
+        }
+        
+        JsonArray images = gltf.getAsJsonArray("images");
+        if (images.isEmpty()) {
+            LOGGER.info("Images array is empty");
+            return null;
+        }
+        
+        // Get first image
+        JsonObject image = images.get(0).getAsJsonObject();
+        LOGGER.info("Found image: {}", image);
+        
+        // Check if image is embedded (has bufferView) or external (has uri)
+        if (!image.has("bufferView")) {
+            LOGGER.info("Image is not embedded (no bufferView)");
+            return null;
+        }
+        
+        int bufferViewIndex = image.get("bufferView").getAsInt();
+        String mimeType = image.has("mimeType") ? image.get("mimeType").getAsString() : "image/png";
+        
+        LOGGER.info("Image is embedded with bufferView {}, mimeType: {}", bufferViewIndex, mimeType);
+        
+        // Get buffer view
+        JsonArray bufferViews = gltf.getAsJsonArray("bufferViews");
+        JsonObject bufferView = bufferViews.get(bufferViewIndex).getAsJsonObject();
+        
+        int byteOffset = bufferView.has("byteOffset") ? bufferView.get("byteOffset").getAsInt() : 0;
+        int byteLength = bufferView.get("byteLength").getAsInt();
+        
+        LOGGER.info("Extracting texture: offset={}, length={}", byteOffset, byteLength);
+        
+        // Extract texture data from binary buffer
+        byte[] textureData = new byte[byteLength];
+        System.arraycopy(binData, byteOffset, textureData, 0, byteLength);
+        
+        LOGGER.info("Successfully extracted embedded texture ({} bytes)", textureData.length);
+        return textureData;
+    }
     
     /**
      * Parses a GLB file and extracts mesh data
      * @param glbData The GLB file as a byte array
+     * @param textureSampler Optional texture sampler for sampling colors from UV coords
      * @return Parsed mesh data
      * @throws IOException If the GLB format is invalid
      */
-    public static MeshData parse(byte[] glbData) throws IOException {
+    public static MeshData parse(byte[] glbData, TextureSampler textureSampler) throws IOException {
         LOGGER.info("Parsing GLB file ({} bytes)", glbData.length);
         
         ByteBuffer buffer = ByteBuffer.wrap(glbData);
@@ -88,14 +169,25 @@ public class GLBParser {
         LOGGER.info("Extracted binary data ({} bytes)", binData.length);
         
         // Extract mesh data from glTF structure
-        return extractMeshData(gltf, binData);
+        return extractMeshData(gltf, binData, textureSampler);
     }
     
     /**
      * Extracts mesh data from glTF JSON structure and binary buffer
      */
-    private static MeshData extractMeshData(JsonObject gltf, byte[] binData) throws IOException {
+    private static MeshData extractMeshData(JsonObject gltf, byte[] binData, TextureSampler textureSampler) throws IOException {
         LOGGER.info("Extracting mesh data from glTF structure");
+        
+        // Log texture/image information from GLB
+        if (gltf.has("textures")) {
+            LOGGER.info("GLB contains textures: {}", gltf.get("textures"));
+        }
+        if (gltf.has("images")) {
+            LOGGER.info("GLB contains images: {}", gltf.get("images"));
+        }
+        if (gltf.has("materials")) {
+            LOGGER.info("GLB contains materials: {}", gltf.get("materials"));
+        }
         
         JsonArray meshes = gltf.getAsJsonArray("meshes");
         if (meshes == null || meshes.isEmpty()) {
@@ -109,8 +201,10 @@ public class GLBParser {
         List<Float> allVertices = new ArrayList<>();
         List<Integer> allIndices = new ArrayList<>();
         List<Integer> allColors = new ArrayList<>();
+        List<Float> allUVs = new ArrayList<>();
         
         int vertexOffset = 0;
+        boolean hasTexture = (textureSampler != null);
         
         // Process each primitive (submesh)
         for (int i = 0; i < primitives.size(); i++) {
@@ -139,15 +233,66 @@ public class GLBParser {
                 }
             }
             
-            // Extract colors if available, otherwise generate varied colors based on position
+            // Extract UV coordinates if available
+            float[] uvs = null;
+            if (attributes.has("TEXCOORD_0")) {
+                int uvAccessorIndex = attributes.get("TEXCOORD_0").getAsInt();
+                uvs = extractFloatArray(gltf, binData, uvAccessorIndex);
+                LOGGER.info("Primitive {}: Found TEXCOORD_0 with {} UVs", i, uvs.length / 2);
+            }
+            
+            // Extract or generate colors
             int[] colors;
-            if (attributes.has("COLOR_0")) {
+            if (hasTexture && uvs != null) {
+                // Sample colors from texture using UV coordinates
+                LOGGER.info("Primitive {}: Sampling colors from texture", i);
+                colors = new int[positions.length / 3];
+                
+                // Track color distribution for debugging
+                int whiteCount = 0, redCount = 0, blackCount = 0, otherCount = 0;
+                float minU = Float.MAX_VALUE, maxU = Float.MIN_VALUE;
+                float minV = Float.MAX_VALUE, maxV = Float.MIN_VALUE;
+                
+                for (int j = 0; j < colors.length; j++) {
+                    float u = uvs[j * 2];
+                    float v = uvs[j * 2 + 1];
+                    colors[j] = textureSampler.sample(u, v);
+                    
+                    minU = Math.min(minU, u);
+                    maxU = Math.max(maxU, u);
+                    minV = Math.min(minV, v);
+                    maxV = Math.max(maxV, v);
+                    
+                    // Sample first few for debugging
+                    if (j < 5) {
+                        int r = (colors[j] >> 16) & 0xFF;
+                        int g = (colors[j] >> 8) & 0xFF;
+                        int b = colors[j] & 0xFF;
+                        LOGGER.info("  Sample {}: UV=({},{}) -> RGB=({},{},{})", j, u, v, r, g, b);
+                    }
+                    
+                    // Count color distribution
+                    int r = (colors[j] >> 16) & 0xFF;
+                    int g = (colors[j] >> 8) & 0xFF;
+                    int b = colors[j] & 0xFF;
+                    if (r > 200 && g > 200 && b > 200) whiteCount++;
+                    else if (r > 150 && r > g * 2 && r > b * 2) redCount++;
+                    else if (r < 50 && g < 50 && b < 50) blackCount++;
+                    else otherCount++;
+                }
+                
+                LOGGER.info("Primitive {}: Color distribution - White: {}, Red: {}, Black: {}, Other: {}", 
+                    i, whiteCount, redCount, blackCount, otherCount);
+                LOGGER.info("Primitive {}: UV coordinate range - U: [{}, {}], V: [{}, {}]", 
+                    i, minU, maxU, minV, maxV);
+            } else if (attributes.has("COLOR_0")) {
+                // Use vertex colors from GLB
                 int colorAccessorIndex = attributes.get("COLOR_0").getAsInt();
                 colors = extractColorArray(gltf, binData, colorAccessorIndex);
                 LOGGER.info("Primitive {}: Found COLOR_0 attribute with {} colors", i, colors.length);
             } else {
                 // No color data available - generate colors based on vertex position
-                LOGGER.info("Primitive {}: No COLOR_0 attribute, generating colors from geometry", i);
+                LOGGER.info("Primitive {}: No color/texture data, generating colors from geometry", i);
                 colors = new int[positions.length / 3];
                 for (int j = 0; j < colors.length; j++) {
                     // Generate varied colors based on position to create visual variety
@@ -171,6 +316,11 @@ public class GLBParser {
             for (int color : colors) {
                 allColors.add(color);
             }
+            if (uvs != null) {
+                for (float uv : uvs) {
+                    allUVs.add(uv);
+                }
+            }
             
             vertexOffset += positions.length / 3;
         }
@@ -184,10 +334,18 @@ public class GLBParser {
         int[] indices = allIndices.stream().mapToInt(Integer::intValue).toArray();
         int[] colors = allColors.stream().mapToInt(Integer::intValue).toArray();
         
-        LOGGER.info("Extracted mesh: {} vertices, {} indices, {} colors",
-                vertices.length / 3, indices.length, colors.length);
+        float[] uvs = null;
+        if (!allUVs.isEmpty()) {
+            uvs = new float[allUVs.size()];
+            for (int i = 0; i < allUVs.size(); i++) {
+                uvs[i] = allUVs.get(i);
+            }
+        }
         
-        return new MeshData(vertices, indices, colors);
+        LOGGER.info("Extracted mesh: {} vertices, {} indices, {} colors, {} UVs",
+                vertices.length / 3, indices.length, colors.length, uvs != null ? uvs.length / 2 : 0);
+        
+        return new MeshData(vertices, indices, colors, uvs);
     }
     
     /**

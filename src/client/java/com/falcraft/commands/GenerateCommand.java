@@ -3,6 +3,7 @@ package com.falcraft.commands;
 import com.falcraft.util.BlockPlacer;
 import com.falcraft.util.FalAPI;
 import com.falcraft.util.GLBParser;
+import com.falcraft.util.TextureSampler;
 import com.falcraft.util.Voxelizer;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -13,6 +14,10 @@ import net.minecraft.network.chat.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.argument;
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal;
 
@@ -22,7 +27,10 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.lit
  */
 public class GenerateCommand {
     private static final Logger LOGGER = LoggerFactory.getLogger("GenerateCommand");
-    private static final int VOXEL_RESOLUTION = 32; // 32x32x32 voxel grid
+    
+    // Voxel resolution - higher = more detail but slower
+    // Recommended values: 32 (fast), 48 (balanced), 64 (detailed), 96 (very detailed), 128 (maximum)
+    private static final int VOXEL_RESOLUTION = 64; // 64x64x64 voxel grid for better detail
     
     public static void register(CommandDispatcher<FabricClientCommandSource> dispatcher) {
         dispatcher.register(literal("fal")
@@ -49,21 +57,67 @@ public class GenerateCommand {
                     source.sendFeedback(Component.literal("§e[fal] Generating 3D model with AI...")));
                 
                 FalAPI falApi = new FalAPI();
-                byte[] glbData = falApi.generateModel(prompt);
+                FalAPI.ModelResult modelResult = falApi.generateModel(prompt);
                 
-                LOGGER.info("Received GLB model from fal API ({} bytes)", glbData.length);
+                LOGGER.info("Received GLB model from fal API ({} bytes)", modelResult.glbData().length);
                 Minecraft.getInstance().execute(() ->
                     source.sendFeedback(Component.literal("§e[fal] Model generated! Processing...")));
                 
-                // Step 2: Parse GLB file
+                // Step 2: Extract embedded texture from GLB (more reliable than external texture_urls)
+                TextureSampler textureSampler = null;
+                try {
+                    Minecraft.getInstance().execute(() ->
+                        source.sendFeedback(Component.literal("§e[fal] Extracting texture from GLB...")));
+                    
+                    byte[] embeddedTexture = GLBParser.extractEmbeddedTexture(modelResult.glbData());
+                    if (embeddedTexture != null) {
+                        textureSampler = new TextureSampler(embeddedTexture);
+                        LOGGER.info("Loaded embedded texture from GLB: {} bytes", embeddedTexture.length);
+                        
+                        // DEBUG: Save embedded texture to disk for inspection
+                        try {
+                            Path debugPath = Paths.get("debug_texture_embedded.jpg");
+                            Files.write(debugPath, embeddedTexture);
+                            LOGGER.info("DEBUG: Saved embedded texture to: {}", debugPath.toAbsolutePath());
+                        } catch (Exception ex) {
+                            LOGGER.warn("Could not save debug texture: {}", ex.getMessage());
+                        }
+                        
+                        Minecraft.getInstance().execute(() ->
+                            source.sendFeedback(Component.literal("§e[fal] Embedded texture extracted!")));
+                    } else {
+                        LOGGER.warn("No embedded texture found in GLB");
+                        Minecraft.getInstance().execute(() ->
+                            source.sendFeedback(Component.literal("§6[fal] No embedded texture, will use vertex colors")));
+                    }
+                } catch (Exception e) {
+                    LOGGER.error("Failed to extract embedded texture: {}", e.getMessage(), e);
+                    Minecraft.getInstance().execute(() ->
+                        source.sendFeedback(Component.literal("§6[fal] Could not extract texture")));
+                }
+                
+                // DEBUG: Also download and save external texture for comparison
+                if (modelResult.textureUrl() != null) {
+                    try {
+                        LOGGER.info("DEBUG: Downloading external texture from texture_urls for comparison...");
+                        byte[] externalTexture = falApi.downloadFile(modelResult.textureUrl());
+                        Path externalPath = Paths.get("debug_texture_external.png");
+                        Files.write(externalPath, externalTexture);
+                        LOGGER.info("DEBUG: Saved external texture to: {}", externalPath.toAbsolutePath());
+                    } catch (Exception ex) {
+                        LOGGER.warn("Could not save external debug texture: {}", ex.getMessage());
+                    }
+                }
+                
+                // Step 3: Parse GLB file with texture sampling
                 Minecraft.getInstance().execute(() ->
                     source.sendFeedback(Component.literal("§e[fal] Parsing 3D model...")));
                 
-                GLBParser.MeshData meshData = GLBParser.parse(glbData);
+                GLBParser.MeshData meshData = GLBParser.parse(modelResult.glbData(), textureSampler);
                 LOGGER.info("Parsed GLB: {} vertices, {} indices", 
                         meshData.vertices().length / 3, meshData.indices().length);
                 
-                // Step 3: Voxelize the mesh
+                // Step 4: Voxelize the mesh
                 Minecraft.getInstance().execute(() ->
                     source.sendFeedback(Component.literal("§e[fal] Converting to voxels (" + 
                             VOXEL_RESOLUTION + "x" + VOXEL_RESOLUTION + "x" + VOXEL_RESOLUTION + ")...")));
@@ -77,7 +131,7 @@ public class GenerateCommand {
                     return;
                 }
                 
-                // Step 4: Place blocks in the world (MUST run on main thread)
+                // Step 5: Place blocks in the world (MUST run on main thread)
                 Minecraft.getInstance().execute(() -> {
                     try {
                         source.sendFeedback(Component.literal("§e[fal] Placing blocks in world..."));

@@ -4,7 +4,9 @@ import net.minecraft.core.BlockPos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -19,6 +21,44 @@ public class Voxelizer {
      * @param size The resolution of the voxel grid
      */
     public record VoxelGrid(Map<BlockPos, Integer> voxels, int size) {}
+    
+    /**
+     * Helper class to store triangle data with UV coordinates
+     */
+    private static class Triangle {
+        float x0, y0, z0, x1, y1, z1, x2, y2, z2;
+        float u0, v0, u1, v1, u2, v2;
+        int color0, color1, color2;
+        
+        Triangle(float x0, float y0, float z0, float x1, float y1, float z1, float x2, float y2, float z2,
+                float u0, float v0, float u1, float v1, float u2, float v2,
+                int color0, int color1, int color2) {
+            this.x0 = x0; this.y0 = y0; this.z0 = z0;
+            this.x1 = x1; this.y1 = y1; this.z1 = z1;
+            this.x2 = x2; this.y2 = y2; this.z2 = z2;
+            this.u0 = u0; this.v0 = v0;
+            this.u1 = u1; this.v1 = v1;
+            this.u2 = u2; this.v2 = v2;
+            this.color0 = color0; this.color1 = color1; this.color2 = color2;
+        }
+        
+        /**
+         * Interpolates color using barycentric coordinates
+         */
+        int interpolateColor(float bary0, float bary1, float bary2) {
+            // Extract RGB components
+            int r0 = (color0 >> 16) & 0xFF, g0 = (color0 >> 8) & 0xFF, b0 = color0 & 0xFF;
+            int r1 = (color1 >> 16) & 0xFF, g1 = (color1 >> 8) & 0xFF, b1 = color1 & 0xFF;
+            int r2 = (color2 >> 16) & 0xFF, g2 = (color2 >> 8) & 0xFF, b2 = color2 & 0xFF;
+            
+            // Interpolate
+            int r = (int) (r0 * bary0 + r1 * bary1 + r2 * bary2);
+            int g = (int) (g0 * bary0 + g1 * bary1 + g2 * bary2);
+            int b = (int) (b0 * bary0 + b1 * bary1 + b2 * bary2);
+            
+            return (r << 16) | (g << 8) | b;
+        }
+    }
     
     /**
      * Voxelizes a mesh into a 3D grid
@@ -75,46 +115,73 @@ public class Voxelizer {
         // Create voxel grid
         Map<BlockPos, Integer> voxels = new HashMap<>();
         
-        // Voxelize using triangle rasterization
+        // Build list of triangles with color information
+        List<Triangle> triangles = new ArrayList<>();
         for (int i = 0; i < indices.length; i += 3) {
             int idx0 = indices[i];
             int idx1 = indices[i + 1];
             int idx2 = indices[i + 2];
             
-            // Get triangle vertices
-            float x0 = vertices[idx0 * 3];
-            float y0 = vertices[idx0 * 3 + 1];
-            float z0 = vertices[idx0 * 3 + 2];
+            triangles.add(new Triangle(
+                vertices[idx0 * 3], vertices[idx0 * 3 + 1], vertices[idx0 * 3 + 2],
+                vertices[idx1 * 3], vertices[idx1 * 3 + 1], vertices[idx1 * 3 + 2],
+                vertices[idx2 * 3], vertices[idx2 * 3 + 1], vertices[idx2 * 3 + 2],
+                0, 0, 0, 0, 0, 0, // UVs not used here
+                colors[idx0], colors[idx1], colors[idx2]
+            ));
+        }
+        
+        LOGGER.info("Voxelizing {} triangles using surface rasterization", triangles.size());
+        
+        // Surface voxelization: rasterize each triangle's surface
+        for (Triangle tri : triangles) {
+            // Transform triangle to voxel space
+            int vx0 = (int) ((tri.x0 - minX) * scale);
+            int vy0 = (int) ((tri.y0 - minY) * scale);
+            int vz0 = (int) ((tri.z0 - minZ) * scale);
             
-            float x1 = vertices[idx1 * 3];
-            float y1 = vertices[idx1 * 3 + 1];
-            float z1 = vertices[idx1 * 3 + 2];
+            int vx1 = (int) ((tri.x1 - minX) * scale);
+            int vy1 = (int) ((tri.y1 - minY) * scale);
+            int vz1 = (int) ((tri.z1 - minZ) * scale);
             
-            float x2 = vertices[idx2 * 3];
-            float y2 = vertices[idx2 * 3 + 1];
-            float z2 = vertices[idx2 * 3 + 2];
+            int vx2 = (int) ((tri.x2 - minX) * scale);
+            int vy2 = (int) ((tri.y2 - minY) * scale);
+            int vz2 = (int) ((tri.z2 - minZ) * scale);
             
-            // Transform to voxel space
-            int vx0 = (int) ((x0 - minX) * scale);
-            int vy0 = (int) ((y0 - minY) * scale);
-            int vz0 = (int) ((z0 - minZ) * scale);
+            // Get bounding box of triangle in voxel space
+            int minVX = Math.max(0, Math.min(Math.min(vx0, vx1), vx2));
+            int maxVX = Math.min(resolution - 1, Math.max(Math.max(vx0, vx1), vx2));
+            int minVY = Math.max(0, Math.min(Math.min(vy0, vy1), vy2));
+            int maxVY = Math.min(resolution - 1, Math.max(Math.max(vy0, vy1), vy2));
+            int minVZ = Math.max(0, Math.min(Math.min(vz0, vz1), vz2));
+            int maxVZ = Math.min(resolution - 1, Math.max(Math.max(vz0, vz1), vz2));
             
-            int vx1 = (int) ((x1 - minX) * scale);
-            int vy1 = (int) ((y1 - minY) * scale);
-            int vz1 = (int) ((z1 - minZ) * scale);
-            
-            int vx2 = (int) ((x2 - minX) * scale);
-            int vy2 = (int) ((y2 - minY) * scale);
-            int vz2 = (int) ((z2 - minZ) * scale);
-            
-            // Get average color for this triangle
-            int color0 = colors[idx0];
-            int color1 = colors[idx1];
-            int color2 = colors[idx2];
-            int avgColor = averageColors(color0, color1, color2);
-            
-            // Rasterize triangle to voxels
-            rasterizeTriangle(voxels, vx0, vy0, vz0, vx1, vy1, vz1, vx2, vy2, vz2, avgColor, resolution);
+            // Rasterize triangle within bounding box
+            for (int vx = minVX; vx <= maxVX; vx++) {
+                for (int vy = minVY; vy <= maxVY; vy++) {
+                    for (int vz = minVZ; vz <= maxVZ; vz++) {
+                        // Calculate voxel center in world space
+                        float worldX = minX + (vx + 0.5f) / scale;
+                        float worldY = minY + (vy + 0.5f) / scale;
+                        float worldZ = minZ + (vz + 0.5f) / scale;
+                        
+                        // Calculate barycentric coordinates
+                        float[] bary = new float[3];
+                        float dist = distanceToTriangle(worldX, worldY, worldZ, tri, bary);
+                        
+                        // Only fill if very close to surface (tight threshold for sharp features)
+                        float voxelSize = 1.0f / scale;
+                        if (dist < voxelSize * 0.866f) { // sqrt(3)/2 ≈ 0.866 (half voxel diagonal)
+                            BlockPos pos = new BlockPos(vx, vy, vz);
+                            if (!voxels.containsKey(pos)) {
+                                // Interpolate color using barycentric coordinates
+                                int color = tri.interpolateColor(bary[0], bary[1], bary[2]);
+                                voxels.put(pos, color);
+                            }
+                        }
+                    }
+                }
+            }
         }
         
         LOGGER.info("Voxelized mesh: {} voxels", voxels.size());
@@ -123,125 +190,74 @@ public class Voxelizer {
     }
     
     /**
-     * Rasterizes a triangle into voxels using a simple scan-line approach
+     * Calculates the distance from a point to a triangle and returns barycentric coordinates
+     * @param px Point X coordinate
+     * @param py Point Y coordinate
+     * @param pz Point Z coordinate
+     * @param tri Triangle
+     * @param bary Output array for barycentric coordinates [u, v, w]
+     * @return Distance from point to triangle
      */
-    private static void rasterizeTriangle(Map<BlockPos, Integer> voxels,
-                                         int x0, int y0, int z0,
-                                         int x1, int y1, int z1,
-                                         int x2, int y2, int z2,
-                                         int color, int resolution) {
-        // Simple approach: voxelize all points along the triangle edges
-        voxelizeLine(voxels, x0, y0, z0, x1, y1, z1, color, resolution);
-        voxelizeLine(voxels, x1, y1, z1, x2, y2, z2, color, resolution);
-        voxelizeLine(voxels, x2, y2, z2, x0, y0, z0, color, resolution);
+    private static float distanceToTriangle(float px, float py, float pz, Triangle tri, float[] bary) {
+        // Vector from vertex 0 to point
+        float dx = px - tri.x0;
+        float dy = py - tri.y0;
+        float dz = pz - tri.z0;
         
-        // Fill interior using scanline
-        fillTriangle(voxels, x0, y0, z0, x1, y1, z1, x2, y2, z2, color, resolution);
-    }
-    
-    /**
-     * Voxelizes a line using 3D Bresenham algorithm
-     */
-    private static void voxelizeLine(Map<BlockPos, Integer> voxels,
-                                     int x0, int y0, int z0,
-                                     int x1, int y1, int z1,
-                                     int color, int resolution) {
-        int dx = Math.abs(x1 - x0);
-        int dy = Math.abs(y1 - y0);
-        int dz = Math.abs(z1 - z0);
+        // Triangle edges
+        float e1x = tri.x1 - tri.x0;
+        float e1y = tri.y1 - tri.y0;
+        float e1z = tri.z1 - tri.z0;
         
-        int sx = x0 < x1 ? 1 : -1;
-        int sy = y0 < y1 ? 1 : -1;
-        int sz = z0 < z1 ? 1 : -1;
+        float e2x = tri.x2 - tri.x0;
+        float e2y = tri.y2 - tri.y0;
+        float e2z = tri.z2 - tri.z0;
         
-        int dm = Math.max(Math.max(dx, dy), dz);
+        // Calculate barycentric coordinates
+        float d00 = e1x * e1x + e1y * e1y + e1z * e1z;
+        float d01 = e1x * e2x + e1y * e2y + e1z * e2z;
+        float d11 = e2x * e2x + e2y * e2y + e2z * e2z;
+        float d20 = dx * e1x + dy * e1y + dz * e1z;
+        float d21 = dx * e2x + dy * e2y + dz * e2z;
         
-        // Handle degenerate case where start and end are the same point
-        if (dm == 0) {
-            if (x0 >= 0 && x0 < resolution && y0 >= 0 && y0 < resolution && z0 >= 0 && z0 < resolution) {
-                voxels.put(new BlockPos(x0, y0, z0), color);
-            }
-            return;
+        float denom = d00 * d11 - d01 * d01;
+        if (Math.abs(denom) < 1e-8f) {
+            // Degenerate triangle
+            bary[0] = 1.0f;
+            bary[1] = 0.0f;
+            bary[2] = 0.0f;
+            return Float.MAX_VALUE;
         }
         
-        int x = x0, y = y0, z = z0;
+        float v = (d11 * d20 - d01 * d21) / denom;
+        float w = (d00 * d21 - d01 * d20) / denom;
+        float u = 1.0f - v - w;
         
-        int err1 = dm / 2;
-        int err2 = dm / 2;
+        // Clamp barycentric coordinates to triangle
+        bary[0] = Math.max(0, Math.min(1, u));
+        bary[1] = Math.max(0, Math.min(1, v));
+        bary[2] = Math.max(0, Math.min(1, w));
         
-        for (int i = 0; i <= dm; i++) {
-            if (x >= 0 && x < resolution && y >= 0 && y < resolution && z >= 0 && z < resolution) {
-                voxels.put(new BlockPos(x, y, z), color);
-            }
-            
-            err1 -= dx;
-            if (err1 < 0) {
-                err1 += dm;
-                x += sx;
-            }
-            
-            err2 -= dy;
-            if (err2 < 0) {
-                err2 += dm;
-                y += sy;
-            }
-            
-            if (i * dz / dm > (i - 1) * dz / dm) {
-                z += sz;
-            }
+        // Normalize if outside triangle
+        float sum = bary[0] + bary[1] + bary[2];
+        if (sum > 0) {
+            bary[0] /= sum;
+            bary[1] /= sum;
+            bary[2] /= sum;
         }
+        
+        // Calculate closest point on triangle
+        float closestX = tri.x0 * bary[0] + tri.x1 * bary[1] + tri.x2 * bary[2];
+        float closestY = tri.y0 * bary[0] + tri.y1 * bary[1] + tri.y2 * bary[2];
+        float closestZ = tri.z0 * bary[0] + tri.z1 * bary[1] + tri.z2 * bary[2];
+        
+        // Distance from point to closest point
+        float distX = px - closestX;
+        float distY = py - closestY;
+        float distZ = pz - closestZ;
+        
+        return (float) Math.sqrt(distX * distX + distY * distY + distZ * distZ);
     }
     
-    /**
-     * Fills a triangle interior with voxels
-     */
-    private static void fillTriangle(Map<BlockPos, Integer> voxels,
-                                     int x0, int y0, int z0,
-                                     int x1, int y1, int z1,
-                                     int x2, int y2, int z2,
-                                     int color, int resolution) {
-        // Calculate triangle center
-        int cx = (x0 + x1 + x2) / 3;
-        int cy = (y0 + y1 + y2) / 3;
-        int cz = (z0 + z1 + z2) / 3;
-        
-        // Fill from center to edges (simple flood fill approach)
-        // Draw lines from center to each vertex
-        voxelizeLine(voxels, cx, cy, cz, x0, y0, z0, color, resolution);
-        voxelizeLine(voxels, cx, cy, cz, x1, y1, z1, color, resolution);
-        voxelizeLine(voxels, cx, cy, cz, x2, y2, z2, color, resolution);
-        
-        // Draw lines between midpoints
-        int mx01 = (x0 + x1) / 2, my01 = (y0 + y1) / 2, mz01 = (z0 + z1) / 2;
-        int mx12 = (x1 + x2) / 2, my12 = (y1 + y2) / 2, mz12 = (z1 + z2) / 2;
-        int mx20 = (x2 + x0) / 2, my20 = (y2 + y0) / 2, mz20 = (z2 + z0) / 2;
-        
-        voxelizeLine(voxels, cx, cy, cz, mx01, my01, mz01, color, resolution);
-        voxelizeLine(voxels, cx, cy, cz, mx12, my12, mz12, color, resolution);
-        voxelizeLine(voxels, cx, cy, cz, mx20, my20, mz20, color, resolution);
-    }
-    
-    /**
-     * Averages three RGB colors
-     */
-    private static int averageColors(int c1, int c2, int c3) {
-        int r1 = (c1 >> 16) & 0xFF;
-        int g1 = (c1 >> 8) & 0xFF;
-        int b1 = c1 & 0xFF;
-        
-        int r2 = (c2 >> 16) & 0xFF;
-        int g2 = (c2 >> 8) & 0xFF;
-        int b2 = c2 & 0xFF;
-        
-        int r3 = (c3 >> 16) & 0xFF;
-        int g3 = (c3 >> 8) & 0xFF;
-        int b3 = c3 & 0xFF;
-        
-        int r = (r1 + r2 + r3) / 3;
-        int g = (g1 + g2 + g3) / 3;
-        int b = (b1 + b2 + b3) / 3;
-        
-        return (r << 16) | (g << 8) | b;
-    }
 }
 
