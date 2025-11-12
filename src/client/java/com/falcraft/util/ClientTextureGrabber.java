@@ -129,8 +129,8 @@ public class ClientTextureGrabber {
                 // Copy pixel data from the sprite
                 for (int y = 0; y < height; y++) {
                     for (int x = 0; x < width; x++) {
-                        int color = sourceImage.getPixel(x, y);
-                        image.setPixel(x, y, color);
+                        int color = sourceImage.getPixelRGBA(x, y);
+                        image.setPixelRGBA(x, y, color);
                     }
                 }
             } catch (NoSuchFieldException | IllegalAccessException e) {

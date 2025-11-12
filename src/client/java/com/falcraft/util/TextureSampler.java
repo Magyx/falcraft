@@ -95,24 +95,15 @@ public class TextureSampler {
         int g = (rgb >> 8) & 0xFF;
         int b = rgb & 0xFF;
         
-        // Apply brightness correction to remove baked-in shadows
-        // Meshy textures have heavy shadows that make everything dark
-        // Use a more moderate brightness boost with better color preservation
-        float brightness = 1.8f; // Moderate brightness boost
-        float gamma = 0.7f; // Slightly less aggressive gamma to preserve color saturation
+        // Apply minimal brightness correction to compensate for baked-in shadows
+        // Keep it very subtle to preserve natural colors
+        float brightness = 1.15f; // Minimal brightness boost
+        float gamma = 0.92f; // Near-neutral gamma
         
         // Apply gamma correction to lift shadows while preserving color ratios
         r = (int) (Math.pow(r / 255.0f, gamma) * 255 * brightness);
         g = (int) (Math.pow(g / 255.0f, gamma) * 255 * brightness);
         b = (int) (Math.pow(b / 255.0f, gamma) * 255 * brightness);
-        
-        // Preserve color saturation for reds - if it's a red-ish color, boost red channel more
-        int avg = (r + g + b) / 3;
-        if (r > g && r > b && avg < 100) {
-            // This is a dark red - boost it more aggressively
-            r = (int) (r * 1.3f);
-            r = Math.min(255, r);
-        }
         
         // Clamp to valid range
         r = Math.min(255, Math.max(0, r));

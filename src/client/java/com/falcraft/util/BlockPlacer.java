@@ -98,7 +98,8 @@ public class BlockPlacer {
     
     /**
      * Calculates where to place the voxel grid based on player look direction
-     * Places the model a few blocks away in the direction the player is looking
+     * Places the model a few blocks away in the direction the player is looking,
+     * but always sits it flat on the ground to prevent hovering
      */
     private static BlockPos calculatePlacementOrigin(LocalPlayer player, int gridSize) {
         Vec3 playerPos = player.position();
@@ -108,27 +109,50 @@ public class BlockPlacer {
         // Larger models are placed further away
         double distance = Math.max(gridSize * 0.7, 5.0);
         
-        // Calculate target position in look direction
+        // Calculate target position in look direction (horizontal only)
         Vec3 targetPos = playerPos.add(
             lookVec.x * distance,
-            lookVec.y * distance,
+            0,  // Don't use Y look direction - we'll find ground instead
             lookVec.z * distance
         );
         
-        // Center the grid at the target position
-        // Offset by half the grid size to center it
-        BlockPos origin = BlockPos.containing(
+        // Center horizontally, start at player's Y for ground search
+        BlockPos horizontalOrigin = BlockPos.containing(
             targetPos.x - gridSize / 2.0,
-            targetPos.y - gridSize / 2.0,
+            playerPos.y,
             targetPos.z - gridSize / 2.0
         );
         
-        // Ensure the model doesn't spawn too low (at least at player's feet level)
-        if (origin.getY() < player.getBlockY()) {
-            origin = new BlockPos(origin.getX(), player.getBlockY(), origin.getZ());
+        // Find the ground level below the target position
+        int groundY = findGroundLevel(player.level(), horizontalOrigin, player.getBlockY());
+        
+        return new BlockPos(horizontalOrigin.getX(), groundY, horizontalOrigin.getZ());
+    }
+    
+    /**
+     * Finds the ground level below a position by scanning downward
+     * @param level The level to search in
+     * @param startPos Starting position for the search
+     * @param minY Minimum Y level to search (player's feet level)
+     * @return Y coordinate where the model should be placed
+     */
+    private static int findGroundLevel(Level level, BlockPos startPos, int minY) {
+        // Scan downward from start position to find solid ground
+        for (int y = startPos.getY(); y >= minY - 10; y--) {
+            BlockPos checkPos = new BlockPos(startPos.getX(), y, startPos.getZ());
+            BlockState blockState = level.getBlockState(checkPos);
+            BlockState aboveState = level.getBlockState(checkPos.above());
+            
+            // Found ground: solid block with air above
+            if (!blockState.isAir() && aboveState.isAir()) {
+                LOGGER.info("Found ground at Y={}", y + 1);
+                return y + 1; // Place on top of the solid block
+            }
         }
         
-        return origin;
+        // If no ground found, place at player's feet level
+        LOGGER.warn("No ground found, placing at player level Y={}", minY);
+        return minY;
     }
 }
 

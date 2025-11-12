@@ -6,6 +6,7 @@ import com.falcraft.util.GLBParser;
 import com.falcraft.util.TextureSampler;
 import com.falcraft.util.Voxelizer;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
@@ -23,28 +24,28 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.lit
 
 /**
  * Command to generate 3D models from text prompts using fal AI
- * Usage: /fal generate <prompt>
+ * Usage: /fal generate <size> <prompt>
+ * Size: 16-128 (recommended: 32=fast, 48=balanced, 64=detailed)
  */
 public class GenerateCommand {
     private static final Logger LOGGER = LoggerFactory.getLogger("GenerateCommand");
     
-    // Voxel resolution - higher = more detail but slower
-    // Recommended values: 32 (fast), 48 (balanced), 64 (detailed), 96 (very detailed), 128 (maximum)
-    private static final int VOXEL_RESOLUTION = 64; // 64x64x64 voxel grid for better detail
-    
     public static void register(CommandDispatcher<FabricClientCommandSource> dispatcher) {
         dispatcher.register(literal("fal")
                 .then(literal("generate")
-                        .then(argument("prompt", StringArgumentType.greedyString())
-                                .executes(GenerateCommand::execute))));
+                        .then(argument("size", IntegerArgumentType.integer(16, 128))
+                                .then(argument("prompt", StringArgumentType.greedyString())
+                                        .executes(GenerateCommand::execute)))));
     }
     
     private static int execute(CommandContext<FabricClientCommandSource> context) {
+        int size = IntegerArgumentType.getInteger(context, "size");
         String prompt = StringArgumentType.getString(context, "prompt");
         FabricClientCommandSource source = context.getSource();
         
         // Send initial feedback
-        source.sendFeedback(Component.literal("§e[fal] Starting 3D model generation with prompt: \"" + prompt + "\""));
+        source.sendFeedback(Component.literal("§e[fal] Starting 3D model generation (" + size + "x" + size + "x" + size + ")"));
+        source.sendFeedback(Component.literal("§e[fal] Prompt: \"" + prompt + "\""));
         source.sendFeedback(Component.literal("§e[fal] This may take several minutes..."));
         
         // Run the generation process asynchronously to avoid blocking the game thread
@@ -120,9 +121,9 @@ public class GenerateCommand {
                 // Step 4: Voxelize the mesh
                 Minecraft.getInstance().execute(() ->
                     source.sendFeedback(Component.literal("§e[fal] Converting to voxels (" + 
-                            VOXEL_RESOLUTION + "x" + VOXEL_RESOLUTION + "x" + VOXEL_RESOLUTION + ")...")));
+                            size + "x" + size + "x" + size + ")...")));
                 
-                Voxelizer.VoxelGrid voxelGrid = Voxelizer.voxelize(meshData, VOXEL_RESOLUTION);
+                Voxelizer.VoxelGrid voxelGrid = Voxelizer.voxelize(meshData, size);
                 LOGGER.info("Voxelized mesh: {} voxels", voxelGrid.voxels().size());
                 
                 if (voxelGrid.voxels().isEmpty()) {
