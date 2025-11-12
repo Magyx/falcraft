@@ -8,6 +8,14 @@ A Fabric mod for Minecraft 1.21.10 that brings AI-powered texture generation dir
 ![Fabric API](https://img.shields.io/badge/Fabric%20API-0.136.0-blue)
 ![License](https://img.shields.io/badge/License-CC0-lightgrey)
 
+## 🎥 See It In Action
+
+Watch as we transform Minecraft blocks in real-time using AI-powered texture generation:
+
+https://github.com/blendi-remade/falcraft/raw/1.21/falcraft_demo.mp4
+
+> *Point at any block, run `/fal remix <your prompt>`, and watch the magic happen!*
+
 ## ✨ Features
 
 - 🎯 **Point-and-Remix**: Look at any block and remix its texture with a simple command
