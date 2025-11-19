@@ -17,7 +17,10 @@ Watch as we transform Minecraft with AI-powered generation:
 ## ✨ Features
 
 - 🏗️ **3D Model Generation**: Generate complete 3D structures from text prompts
+- 👁️ **Visual Placement Preview**: See exactly where structures will be placed with ground contact visualization
+- 🎬 **Animated Building**: Watch structures build layer-by-layer from the ground up
 - 🎨 **Perceptual Color Matching**: Uses LAB color space for human-vision-accurate block selection
+- 🧱 **Enhanced Block Palette**: 50+ textured blocks for natural-looking structures
 - 🎯 **Texture Remixing**: Point at any block and remix its texture with AI
 - 🤖 **Powered by fal.ai**: Uses Meshy v6 for 3D generation and nano-banana for texture editing
 - ⚡ **Dynamic Resource Packs**: Texture changes apply instantly - no restart needed
@@ -51,7 +54,8 @@ Create entire structures from text descriptions:
 1. Meshy v6 generates a textured 3D model (5-10 minutes)
 2. Model is voxelized into Minecraft blocks
 3. Colors are mapped using perceptual LAB color space
-4. Structure is placed flat on the ground in your look direction
+4. Visual preview box shows placement location (raycast up to 200 blocks)
+5. Right-click to confirm - structure builds layer-by-layer from ground up
 
 ### Remix Block Textures
 
@@ -105,7 +109,8 @@ echo "FAL_API_KEY=your_key" > run/.env
 2. **Texture Extraction** pulls embedded textures from GLB binary
 3. **Voxelization** converts smooth mesh into Minecraft block grid
 4. **Perceptual Color Matching** uses LAB color space (matches human vision, not just RGB math)
-5. **Smart Placement** finds ground and places structure flat
+5. **Visual Preview** renders placement box with ground contact visualization
+6. **Animated Placement** builds structure layer-by-layer (3 Y-levels/tick)
 
 ### Texture Remixing Pipeline
 
@@ -132,19 +137,23 @@ Instead of simple RGB distance, we use **CIE LAB color space**:
 - Press F3+T to force reload
 
 **Model placement issues**
-- Structures place in your horizontal look direction
-- Automatically finds ground and sits flat
-- Ensure you're looking at an area with ground nearby
+- Look where you want to place (works up to 200 blocks away)
+- Preview box shows exact placement location
+- Right-click to confirm and watch it build
+- Automatically finds ground up to 100 blocks below
 
 ## 🤝 Contributing
 
 Ideas welcome! Fork, create a feature branch, test with `./gradlew runClient`, and open a PR.
 
 **Feature Ideas:**
-- Undo/history for textures and models
+- Intermediate denoising visualization (watch generation emerge from noise)
+- Custom mobs from text prompts
+- Structure rotation before placement
+- Undo/history for placed structures
 - Preset prompts library
 - Entity/item texture support
-- Model scaling and rotation commands
+- Save/load custom structures
 
 ## 📜 License & Credits
 
