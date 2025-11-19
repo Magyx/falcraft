@@ -3,6 +3,7 @@ package com.falcraft.commands;
 import com.falcraft.util.BlockPlacer;
 import com.falcraft.util.FalAPI;
 import com.falcraft.util.GLBParser;
+import com.falcraft.util.PlacementPreview;
 import com.falcraft.util.TextureSampler;
 import com.falcraft.util.Voxelizer;
 import com.mojang.brigadier.CommandDispatcher;
@@ -132,21 +133,21 @@ public class GenerateCommand {
                     return;
                 }
                 
-                // Step 5: Place blocks in the world (MUST run on main thread)
+                // Step 5: Enter placement preview mode (MUST run on main thread)
                 Minecraft.getInstance().execute(() -> {
                     try {
-                        source.sendFeedback(Component.literal("§e[fal] Placing blocks in world..."));
-                        
-                        int blocksPlaced = BlockPlacer.placeVoxelGrid(voxelGrid);
+                        PlacementPreview.startPlacement(voxelGrid);
                         
                         source.sendFeedback(Component.literal(
-                                "§a[fal] ✓ 3D model generated successfully! Placed " + blocksPlaced + " blocks."));
-                        LOGGER.info("3D generation process completed successfully");
+                                "§a[fal] ✓ 3D model generated successfully! " + voxelGrid.voxels().size() + " blocks ready."));
+                        source.sendFeedback(Component.literal(
+                                "§e[fal] Right-click to place the structure!"));
+                        LOGGER.info("3D generation process completed, entering placement preview mode");
                         
                     } catch (Exception e) {
                         String errorMsg = e.getMessage();
-                        source.sendError(Component.literal("§c[fal] Error placing blocks: " + errorMsg));
-                        LOGGER.error("Error placing blocks", e);
+                        source.sendError(Component.literal("§c[fal] Error preparing placement: " + errorMsg));
+                        LOGGER.error("Error preparing placement", e);
                     }
                 });
                 

@@ -49,21 +49,39 @@ public class BlockMapper {
         BLOCK_PALETTE.put(Blocks.STONE_BRICKS, 0x7A7A7A);
         BLOCK_PALETTE.put(Blocks.ANDESITE, 0x878787);
         BLOCK_PALETTE.put(Blocks.DIORITE, 0xE4E4E4);
+        BLOCK_PALETTE.put(Blocks.SMOOTH_STONE, 0xA0A0A0);
+        BLOCK_PALETTE.put(Blocks.POLISHED_ANDESITE, 0x848484);
         
         // Essential wood blocks (for brown/tan range)
         BLOCK_PALETTE.put(Blocks.OAK_PLANKS, 0xB18962);
-        BLOCK_PALETTE.put(Blocks.SPRUCE_PLANKS, 0x6F5740);
         BLOCK_PALETTE.put(Blocks.BIRCH_PLANKS, 0xD2BC7C);
         BLOCK_PALETTE.put(Blocks.DARK_OAK_PLANKS, 0x44331C);
+        BLOCK_PALETTE.put(Blocks.GRANITE, 0x9A6E53);
+        BLOCK_PALETTE.put(Blocks.BRICKS, 0x8F5D4B);
         
         // Terracotta for muted/earthy tones (fills gaps between concrete and stone)
         BLOCK_PALETTE.put(Blocks.WHITE_TERRACOTTA, 0xD1B1A1);
         BLOCK_PALETTE.put(Blocks.LIGHT_GRAY_TERRACOTTA, 0x876B62);
         BLOCK_PALETTE.put(Blocks.GRAY_TERRACOTTA, 0x392A23);
         
-        // Special blocks for unique colors
+        // Dark/black blocks with texture (avoiding flat concrete)
         BLOCK_PALETTE.put(Blocks.COAL_BLOCK, 0x1A1919);  // Very dark
+        BLOCK_PALETTE.put(Blocks.BLACKSTONE, 0x2A2333);  // Dark with natural texture
+        BLOCK_PALETTE.put(Blocks.POLISHED_BLACKSTONE, 0x36313D); // Smooth dark
+        BLOCK_PALETTE.put(Blocks.DEEPSLATE, 0x4F4F51);   // Layered dark gray
+        BLOCK_PALETTE.put(Blocks.DEEPSLATE_TILES, 0x353538); // Tiled very dark
+        BLOCK_PALETTE.put(Blocks.DEEPSLATE_BRICKS, 0x434343); // Dark gray with brick pattern
+        BLOCK_PALETTE.put(Blocks.COBBLED_DEEPSLATE, 0x555555); // Rough dark cobbled stone
+        BLOCK_PALETTE.put(Blocks.DARK_PRISMARINE, 0x395A4E); // Dark teal-gray stone
+        
+        // White/light blocks with texture variety
         BLOCK_PALETTE.put(Blocks.QUARTZ_BLOCK, 0xE8E5DD); // Bright white
+        BLOCK_PALETTE.put(Blocks.CALCITE, 0xE3E4DC);      // Crystalline white
+        BLOCK_PALETTE.put(Blocks.BONE_BLOCK, 0xE3DCC6);   // Cream with lines
+        BLOCK_PALETTE.put(Blocks.WHITE_WOOL, 0xE9ECEC);   // Soft fabric white
+        BLOCK_PALETTE.put(Blocks.MUSHROOM_STEM, 0xC9AE9D); // Pale tan with spots
+        
+        // Special blocks for unique colors
         BLOCK_PALETTE.put(Blocks.SANDSTONE, 0xE3DBB0);    // Warm tan
         BLOCK_PALETTE.put(Blocks.RED_SANDSTONE, 0xBF6330); // Orange-brown
         

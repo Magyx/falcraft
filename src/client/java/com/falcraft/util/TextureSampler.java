@@ -90,27 +90,10 @@ public class TextureSampler {
         int y = (int) ((1.0f - v) * (height - 1));
         
         // Get RGB from image (removing alpha channel)
+        // Use colors directly from AI texture without any adjustments
         int rgb = image.getRGB(x, y) & 0xFFFFFF;
-        int r = (rgb >> 16) & 0xFF;
-        int g = (rgb >> 8) & 0xFF;
-        int b = rgb & 0xFF;
         
-        // Apply minimal brightness correction to compensate for baked-in shadows
-        // Keep it very subtle to preserve natural colors
-        float brightness = 1.15f; // Minimal brightness boost
-        float gamma = 0.92f; // Near-neutral gamma
-        
-        // Apply gamma correction to lift shadows while preserving color ratios
-        r = (int) (Math.pow(r / 255.0f, gamma) * 255 * brightness);
-        g = (int) (Math.pow(g / 255.0f, gamma) * 255 * brightness);
-        b = (int) (Math.pow(b / 255.0f, gamma) * 255 * brightness);
-        
-        // Clamp to valid range
-        r = Math.min(255, Math.max(0, r));
-        g = Math.min(255, Math.max(0, g));
-        b = Math.min(255, Math.max(0, b));
-        
-        return (r << 16) | (g << 8) | b;
+        return rgb;
     }
 }
 

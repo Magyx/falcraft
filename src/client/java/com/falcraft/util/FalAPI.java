@@ -294,7 +294,7 @@ public class FalAPI {
         
         boolean completed = false;
         int attempts = 0;
-        int maxAttempts = 120; // 120 attempts * 5 seconds = 10 minutes max (3D takes longer)
+        int maxAttempts = 160; // 160 attempts * 5 seconds = 13.3 minutes max (3D takes longer)
         
         while (!completed && attempts < maxAttempts) {
             Thread.sleep(5000); // Wait 5 seconds between polls (longer for 3D)

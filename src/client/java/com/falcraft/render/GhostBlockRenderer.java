@@ -1,0 +1,364 @@
+package com.falcraft.render;
+
+import com.falcraft.util.PlacementPreview;
+import com.falcraft.util.Voxelizer;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.*;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import org.joml.Matrix4f;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Renders a bounding box outline for the placement preview system
+ * Extremely lightweight - just draws the edges of the structure bounds
+ */
+public class GhostBlockRenderer {
+    private static final Logger LOGGER = LoggerFactory.getLogger("GhostBlockRenderer");
+    
+    /**
+     * Renders a simple bounding box outline showing where the structure will be placed
+     * Much more performant than rendering all ghost blocks
+     */
+    public static void render(PoseStack poseStack, MultiBufferSource bufferSource, float partialTick) {
+        if (!PlacementPreview.isPlacementActive()) {
+            return;
+        }
+        
+        Voxelizer.VoxelGrid grid = PlacementPreview.getPendingGrid();
+        if (grid == null) {
+            return;
+        }
+        
+        Minecraft minecraft = Minecraft.getInstance();
+        
+        // Calculate preview origin based on player look direction
+        BlockPos origin = PlacementPreview.calculatePreviewOrigin();
+        int size = grid.size();
+        
+        // Get camera position for proper rendering offset
+        Vec3 cameraPos = minecraft.gameRenderer.getMainCamera().getPosition();
+        
+        // Create bounding box for the entire structure
+        AABB box = new AABB(
+            origin.getX() - cameraPos.x,
+            origin.getY() - cameraPos.y,
+            origin.getZ() - cameraPos.z,
+            origin.getX() + size - cameraPos.x,
+            origin.getY() + size - cameraPos.y,
+            origin.getZ() + size - cameraPos.z
+        );
+        
+        // Setup rendering
+        poseStack.pushPose();
+        
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        RenderSystem.disableDepthTest();
+        RenderSystem.depthMask(false);
+        
+        Matrix4f matrix = poseStack.last().pose();
+        Tesselator tesselator = Tesselator.getInstance();
+        
+        // First, draw the box faces (sides are green, bottom is yellow)
+        BufferBuilder faceBuffer = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+        drawBoxFacesWithDistinctBottom(faceBuffer, matrix, box);
+        BufferUploader.drawWithShader(faceBuffer.buildOrThrow());
+        
+        // Draw bright outline edges
+        BufferBuilder lineBuffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+        drawBoxEdges(lineBuffer, matrix, box, 0.0f, 1.0f, 0.0f, 1.0f); // Bright green
+        BufferUploader.drawWithShader(lineBuffer.buildOrThrow());
+        
+        // Draw filled ground plane - shows EXACTLY where structure touches ground
+        BufferBuilder groundPlaneBuffer = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+        drawFilledGroundPlane(groundPlaneBuffer, matrix, box);
+        BufferUploader.drawWithShader(groundPlaneBuffer.buildOrThrow());
+        
+        // Draw vertical corner pillars - bright white for maximum visibility
+        BufferBuilder pillarBuffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+        drawVerticalPillars(pillarBuffer, matrix, box, origin, size);
+        BufferUploader.drawWithShader(pillarBuffer.buildOrThrow());
+        
+        // Draw ground footprint outline - bright white outline ON the ground
+        BufferBuilder groundBuffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
+        drawGroundFootprint(groundBuffer, matrix, box, 1.0f, 1.0f, 1.0f, 1.0f); // Bright white
+        BufferUploader.drawWithShader(groundBuffer.buildOrThrow());
+        
+        RenderSystem.enableDepthTest();
+        RenderSystem.depthMask(true);
+        RenderSystem.disableBlend();
+        
+        poseStack.popPose();
+    }
+    
+    /**
+     * Draws a filled semi-transparent plane on the ground showing exact contact area
+     * This "paints" the ground blocks where the structure will sit
+     */
+    private static void drawFilledGroundPlane(BufferBuilder buffer, Matrix4f matrix, AABB box) {
+        float minX = (float) box.minX;
+        float minY = (float) box.minY;
+        float minZ = (float) box.minZ;
+        float maxX = (float) box.maxX;
+        float maxZ = (float) box.maxZ;
+        
+        // Ground level - offset slightly upward to render on top of terrain
+        float groundY = minY + 0.02f;
+        
+        // Draw a bright white/yellow semi-transparent plane
+        // 50% opacity so you can still see terrain underneath
+        float r = 1.0f; // White with slight yellow tint
+        float g = 1.0f;
+        float b = 0.8f;
+        float a = 0.5f; // 50% opacity
+        
+        // Draw the filled rectangle
+        buffer.addVertex(matrix, minX, groundY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, groundY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, groundY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, groundY, maxZ).setColor(r, g, b, a);
+    }
+    
+    /**
+     * Draws vertical pillars from the bottom 4 corners down to the ground
+     * Uses bright white and draws multiple lines per corner for thickness
+     */
+    private static void drawVerticalPillars(BufferBuilder buffer, Matrix4f matrix, AABB box, BlockPos origin, int size) {
+        float minX = (float) box.minX;
+        float minY = (float) box.minY;
+        float minZ = (float) box.minZ;
+        float maxX = (float) box.maxX;
+        float maxZ = (float) box.maxZ;
+        
+        float groundY = (float) box.minY;
+        float offset = 0.1f; // Offset for thicker lines
+        
+        // Draw BRIGHT WHITE vertical lines from bottom corners
+        // Draw multiple lines per corner to make them thicker and more visible
+        
+        // Corner 1: minX, minZ (draw 3 lines for thickness)
+        for (int i = 0; i < 3; i++) {
+            float xOff = (i - 1) * offset;
+            buffer.addVertex(matrix, minX + xOff, minY, minZ).setColor(1.0f, 1.0f, 1.0f, 1.0f);
+            buffer.addVertex(matrix, minX + xOff, groundY, minZ).setColor(1.0f, 1.0f, 1.0f, 0.7f);
+        }
+        
+        // Corner 2: maxX, minZ
+        for (int i = 0; i < 3; i++) {
+            float xOff = (i - 1) * offset;
+            buffer.addVertex(matrix, maxX + xOff, minY, minZ).setColor(1.0f, 1.0f, 1.0f, 1.0f);
+            buffer.addVertex(matrix, maxX + xOff, groundY, minZ).setColor(1.0f, 1.0f, 1.0f, 0.7f);
+        }
+        
+        // Corner 3: maxX, maxZ
+        for (int i = 0; i < 3; i++) {
+            float xOff = (i - 1) * offset;
+            buffer.addVertex(matrix, maxX + xOff, minY, maxZ).setColor(1.0f, 1.0f, 1.0f, 1.0f);
+            buffer.addVertex(matrix, maxX + xOff, groundY, maxZ).setColor(1.0f, 1.0f, 1.0f, 0.7f);
+        }
+        
+        // Corner 4: minX, maxZ
+        for (int i = 0; i < 3; i++) {
+            float xOff = (i - 1) * offset;
+            buffer.addVertex(matrix, minX + xOff, minY, maxZ).setColor(1.0f, 1.0f, 1.0f, 1.0f);
+            buffer.addVertex(matrix, minX + xOff, groundY, maxZ).setColor(1.0f, 1.0f, 1.0f, 0.7f);
+        }
+    }
+    
+    /**
+     * Draws box faces with distinct bottom face (yellow) vs sides (green)
+     */
+    private static void drawBoxFacesWithDistinctBottom(BufferBuilder buffer, Matrix4f matrix, AABB box) {
+        float minX = (float) box.minX;
+        float minY = (float) box.minY;
+        float minZ = (float) box.minZ;
+        float maxX = (float) box.maxX;
+        float maxY = (float) box.maxY;
+        float maxZ = (float) box.maxZ;
+        
+        // Bottom face - BRIGHT YELLOW with 60% opacity (more opaque)
+        buffer.addVertex(matrix, minX, minY, minZ).setColor(1.0f, 1.0f, 0.0f, 0.6f);
+        buffer.addVertex(matrix, maxX, minY, minZ).setColor(1.0f, 1.0f, 0.0f, 0.6f);
+        buffer.addVertex(matrix, maxX, minY, maxZ).setColor(1.0f, 1.0f, 0.0f, 0.6f);
+        buffer.addVertex(matrix, minX, minY, maxZ).setColor(1.0f, 1.0f, 0.0f, 0.6f);
+        
+        // Top face - Green with 20% opacity
+        buffer.addVertex(matrix, minX, maxY, minZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, minX, maxY, maxZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, maxX, maxY, maxZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, maxX, maxY, minZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        
+        // North face (Z min) - Green with 20% opacity
+        buffer.addVertex(matrix, minX, minY, minZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, minX, maxY, minZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, maxX, maxY, minZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, maxX, minY, minZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        
+        // South face (Z max) - Green with 20% opacity
+        buffer.addVertex(matrix, minX, minY, maxZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, maxX, minY, maxZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, maxX, maxY, maxZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, minX, maxY, maxZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        
+        // West face (X min) - Green with 20% opacity
+        buffer.addVertex(matrix, minX, minY, minZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, minX, minY, maxZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, minX, maxY, maxZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, minX, maxY, minZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        
+        // East face (X max) - Green with 20% opacity
+        buffer.addVertex(matrix, maxX, minY, minZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, maxX, maxY, minZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, maxX, maxY, maxZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+        buffer.addVertex(matrix, maxX, minY, maxZ).setColor(0.0f, 1.0f, 0.3f, 0.2f);
+    }
+    
+    /**
+     * Draws a bright white outline on the ground showing the exact footprint perimeter
+     * Combined with filled plane for maximum visibility
+     */
+    private static void drawGroundFootprint(BufferBuilder buffer, Matrix4f matrix, AABB box, float r, float g, float b, float a) {
+        float minX = (float) box.minX;
+        float minY = (float) box.minY;
+        float minZ = (float) box.minZ;
+        float maxX = (float) box.maxX;
+        float maxZ = (float) box.maxZ;
+        
+        // Draw a thick rectangle outline on the ground level (minY)
+        // Slightly offset upward (+0.03) so it renders on top of filled plane
+        float groundY = minY + 0.03f;
+        
+        // Draw the 4 edges of the footprint rectangle
+        // Edge 1: minX, minZ -> maxX, minZ
+        buffer.addVertex(matrix, minX, groundY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, groundY, minZ).setColor(r, g, b, a);
+        
+        // Edge 2: maxX, minZ -> maxX, maxZ
+        buffer.addVertex(matrix, maxX, groundY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, groundY, maxZ).setColor(r, g, b, a);
+        
+        // Edge 3: maxX, maxZ -> minX, maxZ
+        buffer.addVertex(matrix, maxX, groundY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, groundY, maxZ).setColor(r, g, b, a);
+        
+        // Edge 4: minX, maxZ -> minX, minZ
+        buffer.addVertex(matrix, minX, groundY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, groundY, minZ).setColor(r, g, b, a);
+        
+        // Draw an X across the footprint for even better visual reference
+        // Diagonal 1: minX, minZ -> maxX, maxZ
+        buffer.addVertex(matrix, minX, groundY, minZ).setColor(r, g, b, a * 0.5f);
+        buffer.addVertex(matrix, maxX, groundY, maxZ).setColor(r, g, b, a * 0.5f);
+        
+        // Diagonal 2: maxX, minZ -> minX, maxZ
+        buffer.addVertex(matrix, maxX, groundY, minZ).setColor(r, g, b, a * 0.5f);
+        buffer.addVertex(matrix, minX, groundY, maxZ).setColor(r, g, b, a * 0.5f);
+    }
+    
+    /**
+     * Draws the 6 faces of a bounding box with transparency
+     */
+    private static void drawBoxFaces(BufferBuilder buffer, Matrix4f matrix, AABB box, float r, float g, float b, float a) {
+        float minX = (float) box.minX;
+        float minY = (float) box.minY;
+        float minZ = (float) box.minZ;
+        float maxX = (float) box.maxX;
+        float maxY = (float) box.maxY;
+        float maxZ = (float) box.maxZ;
+        
+        // Bottom face (Y min)
+        buffer.addVertex(matrix, minX, minY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, minY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, minY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, minY, maxZ).setColor(r, g, b, a);
+        
+        // Top face (Y max)
+        buffer.addVertex(matrix, minX, maxY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, maxY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, maxY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, maxY, minZ).setColor(r, g, b, a);
+        
+        // North face (Z min)
+        buffer.addVertex(matrix, minX, minY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, maxY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, maxY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, minY, minZ).setColor(r, g, b, a);
+        
+        // South face (Z max)
+        buffer.addVertex(matrix, minX, minY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, minY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, maxY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, maxY, maxZ).setColor(r, g, b, a);
+        
+        // West face (X min)
+        buffer.addVertex(matrix, minX, minY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, minY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, maxY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, maxY, minZ).setColor(r, g, b, a);
+        
+        // East face (X max)
+        buffer.addVertex(matrix, maxX, minY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, maxY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, maxY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, minY, maxZ).setColor(r, g, b, a);
+    }
+    
+    /**
+     * Draws the 12 edges of a bounding box
+     */
+    private static void drawBoxEdges(BufferBuilder buffer, Matrix4f matrix, AABB box, float r, float g, float b, float a) {
+        float minX = (float) box.minX;
+        float minY = (float) box.minY;
+        float minZ = (float) box.minZ;
+        float maxX = (float) box.maxX;
+        float maxY = (float) box.maxY;
+        float maxZ = (float) box.maxZ;
+        
+        // Bottom face edges
+        buffer.addVertex(matrix, minX, minY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, minY, minZ).setColor(r, g, b, a);
+        
+        buffer.addVertex(matrix, maxX, minY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, minY, maxZ).setColor(r, g, b, a);
+        
+        buffer.addVertex(matrix, maxX, minY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, minY, maxZ).setColor(r, g, b, a);
+        
+        buffer.addVertex(matrix, minX, minY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, minY, minZ).setColor(r, g, b, a);
+        
+        // Top face edges
+        buffer.addVertex(matrix, minX, maxY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, maxY, minZ).setColor(r, g, b, a);
+        
+        buffer.addVertex(matrix, maxX, maxY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, maxY, maxZ).setColor(r, g, b, a);
+        
+        buffer.addVertex(matrix, maxX, maxY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, maxY, maxZ).setColor(r, g, b, a);
+        
+        buffer.addVertex(matrix, minX, maxY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, maxY, minZ).setColor(r, g, b, a);
+        
+        // Vertical edges
+        buffer.addVertex(matrix, minX, minY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, maxY, minZ).setColor(r, g, b, a);
+        
+        buffer.addVertex(matrix, maxX, minY, minZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, maxY, minZ).setColor(r, g, b, a);
+        
+        buffer.addVertex(matrix, maxX, minY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, maxX, maxY, maxZ).setColor(r, g, b, a);
+        
+        buffer.addVertex(matrix, minX, minY, maxZ).setColor(r, g, b, a);
+        buffer.addVertex(matrix, minX, maxY, maxZ).setColor(r, g, b, a);
+    }
+}
+

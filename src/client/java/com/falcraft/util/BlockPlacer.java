@@ -97,36 +97,81 @@ public class BlockPlacer {
     }
     
     /**
-     * Calculates where to place the voxel grid based on player look direction
-     * Places the model a few blocks away in the direction the player is looking,
-     * but always sits it flat on the ground to prevent hovering
+     * Calculates where to place the voxel grid based on what block the player is looking at
+     * Uses raycasting to find the target block, then centers the structure on top of it
      */
     private static BlockPos calculatePlacementOrigin(LocalPlayer player, int gridSize) {
-        Vec3 playerPos = player.position();
+        // Raycast to find what block the player is looking at
+        Vec3 eyePos = player.getEyePosition(1.0f);
         Vec3 lookVec = player.getLookAngle();
+        Vec3 endPos = eyePos.add(lookVec.scale(200.0)); // 200 block reach
         
-        // Place the model at a distance based on its size
-        // Larger models are placed further away
-        double distance = Math.max(gridSize * 0.7, 5.0);
-        
-        // Calculate target position in look direction (horizontal only)
-        Vec3 targetPos = playerPos.add(
-            lookVec.x * distance,
-            0,  // Don't use Y look direction - we'll find ground instead
-            lookVec.z * distance
+        net.minecraft.world.level.ClipContext context = new net.minecraft.world.level.ClipContext(
+            eyePos,
+            endPos,
+            net.minecraft.world.level.ClipContext.Block.OUTLINE,
+            net.minecraft.world.level.ClipContext.Fluid.NONE,
+            player
         );
         
-        // Center horizontally, start at player's Y for ground search
-        BlockPos horizontalOrigin = BlockPos.containing(
-            targetPos.x - gridSize / 2.0,
-            playerPos.y,
-            targetPos.z - gridSize / 2.0
+        net.minecraft.world.phys.BlockHitResult hitResult = player.level().clip(context);
+        
+        BlockPos targetBlock;
+        double minDistance = Math.max(gridSize * 1.2, 15.0); // Minimum comfortable distance
+        
+        if (hitResult.getType() == net.minecraft.world.phys.HitResult.Type.BLOCK) {
+            Vec3 hitPos = hitResult.getLocation();
+            double distanceToHit = eyePos.distanceTo(hitPos);
+            
+            // If the hit block is too close, place further away instead
+            if (distanceToHit < minDistance) {
+                Vec3 targetPos = eyePos.add(lookVec.scale(minDistance));
+                targetBlock = BlockPos.containing(targetPos);
+                
+                // Search down from eye level to find ground (up to 100 blocks down)
+                int groundY = findGroundFromAbove(player.level(), targetBlock, (int)eyePos.y);
+                targetBlock = new BlockPos(targetBlock.getX(), groundY, targetBlock.getZ());
+            } else {
+                // Hit block is at good distance - place on top of it
+                targetBlock = hitResult.getBlockPos().above();
+            }
+        } else {
+            // Not looking at any block - place in front of player
+            Vec3 targetPos = eyePos.add(lookVec.scale(minDistance));
+            targetBlock = BlockPos.containing(targetPos);
+            
+            // Search down from eye level to find ground (up to 100 blocks down)
+            int groundY = findGroundFromAbove(player.level(), targetBlock, (int)eyePos.y);
+            targetBlock = new BlockPos(targetBlock.getX(), groundY, targetBlock.getZ());
+        }
+        
+        // Center the structure horizontally around the target block
+        return new BlockPos(
+            targetBlock.getX() - gridSize / 2,
+            targetBlock.getY(),
+            targetBlock.getZ() - gridSize / 2
         );
+    }
+    
+    /**
+     * Finds ground by searching downward from a high position
+     * Used when placing structures in the air or looking at sky
+     */
+    private static int findGroundFromAbove(Level level, BlockPos startPos, int startY) {
+        // Search down from start position (up to 100 blocks)
+        for (int y = startY; y >= startY - 100; y--) {
+            BlockPos checkPos = new BlockPos(startPos.getX(), y, startPos.getZ());
+            BlockState blockState = level.getBlockState(checkPos);
+            BlockState aboveState = level.getBlockState(checkPos.above());
+            
+            // Found solid ground with air above
+            if (!blockState.isAir() && aboveState.isAir()) {
+                return y + 1; // Place on top
+            }
+        }
         
-        // Find the ground level below the target position
-        int groundY = findGroundLevel(player.level(), horizontalOrigin, player.getBlockY());
-        
-        return new BlockPos(horizontalOrigin.getX(), groundY, horizontalOrigin.getZ());
+        // If no ground found within 100 blocks, place at world bottom + some height
+        return Math.max(level.getMinBuildHeight() + 5, startY - 100);
     }
     
     /**
@@ -136,7 +181,7 @@ public class BlockPlacer {
      * @param minY Minimum Y level to search (player's feet level)
      * @return Y coordinate where the model should be placed
      */
-    private static int findGroundLevel(Level level, BlockPos startPos, int minY) {
+    public static int findGroundLevel(Level level, BlockPos startPos, int minY) {
         // Scan downward from start position to find solid ground
         for (int y = startPos.getY(); y >= minY - 10; y--) {
             BlockPos checkPos = new BlockPos(startPos.getX(), y, startPos.getZ());
