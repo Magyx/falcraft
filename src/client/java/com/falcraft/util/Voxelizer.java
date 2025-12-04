@@ -10,92 +10,314 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Converts 3D mesh data to a voxel grid
+ * Converts 3D mesh data to a voxel grid using the obj2voxel approach:
+ * Triangle-voxel clipping with area-based "max wins" strategy.
+ * 
+ * This is the mathematically correct approach used by professional voxelizers.
+ * Reference: https://github.com/eisenwave/obj2voxel
+ * 
+ * Algorithm:
+ * 1. For each triangle, iterate over voxels in its bounding box
+ * 2. Clip the triangle against the 6 faces of each voxel (Sutherland-Hodgman)
+ * 3. Compute the area of the clipped polygon
+ * 4. The triangle with the largest area inside a voxel determines its color
  */
 public class Voxelizer {
     private static final Logger LOGGER = LoggerFactory.getLogger("Voxelizer");
     
     /**
      * Represents a voxelized 3D model
-     * @param voxels Map of block positions to RGB colors
-     * @param size The resolution of the voxel grid
      */
     public record VoxelGrid(Map<BlockPos, Integer> voxels, int size) {}
     
     /**
-     * Helper class to store triangle data with UV coordinates
+     * 3D Vector for geometry calculations
      */
-    private static class Triangle {
-        float x0, y0, z0, x1, y1, z1, x2, y2, z2;
-        float u0, v0, u1, v1, u2, v2;
-        int color0, color1, color2;
+    private static class Vec3 {
+        double x, y, z;
         
-        Triangle(float x0, float y0, float z0, float x1, float y1, float z1, float x2, float y2, float z2,
-                float u0, float v0, float u1, float v1, float u2, float v2,
-                int color0, int color1, int color2) {
-            this.x0 = x0; this.y0 = y0; this.z0 = z0;
-            this.x1 = x1; this.y1 = y1; this.z1 = z1;
-            this.x2 = x2; this.y2 = y2; this.z2 = z2;
-            this.u0 = u0; this.v0 = v0;
-            this.u1 = u1; this.v1 = v1;
-            this.u2 = u2; this.v2 = v2;
-            this.color0 = color0; this.color1 = color1; this.color2 = color2;
+        Vec3(double x, double y, double z) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+        }
+        
+        Vec3 copy() {
+            return new Vec3(x, y, z);
+        }
+        
+        static Vec3 sub(Vec3 a, Vec3 b) {
+            return new Vec3(a.x - b.x, a.y - b.y, a.z - b.z);
+        }
+        
+        static Vec3 add(Vec3 a, Vec3 b) {
+            return new Vec3(a.x + b.x, a.y + b.y, a.z + b.z);
+        }
+        
+        static Vec3 scale(Vec3 v, double s) {
+            return new Vec3(v.x * s, v.y * s, v.z * s);
+        }
+        
+        static Vec3 cross(Vec3 a, Vec3 b) {
+            return new Vec3(
+                a.y * b.z - a.z * b.y,
+                a.z * b.x - a.x * b.z,
+                a.x * b.y - a.y * b.x
+            );
+        }
+        
+        static double dot(Vec3 a, Vec3 b) {
+            return a.x * b.x + a.y * b.y + a.z * b.z;
+        }
+        
+        double length() {
+            return Math.sqrt(x * x + y * y + z * z);
         }
         
         /**
-         * Interpolates UV coordinates using barycentric coordinates
+         * Linear interpolation between two vectors
          */
-        float[] interpolateUV(float bary0, float bary1, float bary2) {
-            float u = u0 * bary0 + u1 * bary1 + u2 * bary2;
-            float v = v0 * bary0 + v1 * bary1 + v2 * bary2;
-            return new float[] { u, v };
-        }
-        
-        /**
-         * Interpolates color using barycentric coordinates (fallback when no texture)
-         */
-        int interpolateColor(float bary0, float bary1, float bary2) {
-            // Extract RGB components
-            int r0 = (color0 >> 16) & 0xFF, g0 = (color0 >> 8) & 0xFF, b0 = color0 & 0xFF;
-            int r1 = (color1 >> 16) & 0xFF, g1 = (color1 >> 8) & 0xFF, b1 = color1 & 0xFF;
-            int r2 = (color2 >> 16) & 0xFF, g2 = (color2 >> 8) & 0xFF, b2 = color2 & 0xFF;
-            
-            // Interpolate
-            int r = (int) (r0 * bary0 + r1 * bary1 + r2 * bary2);
-            int g = (int) (g0 * bary0 + g1 * bary1 + g2 * bary2);
-            int b = (int) (b0 * bary0 + b1 * bary1 + b2 * bary2);
-            
-            return (r << 16) | (g << 8) | b;
-        }
-        
-        /**
-         * Checks if this triangle has valid UV coordinates
-         */
-        boolean hasValidUVs() {
-            // Check if at least one UV is non-zero (indicating valid texture mapping)
-            return (u0 != 0 || v0 != 0 || u1 != 0 || v1 != 0 || u2 != 0 || v2 != 0);
+        static Vec3 lerp(Vec3 a, Vec3 b, double t) {
+            return new Vec3(
+                a.x + (b.x - a.x) * t,
+                a.y + (b.y - a.y) * t,
+                a.z + (b.z - a.z) * t
+            );
         }
     }
     
     /**
-     * Voxelizes a mesh into a 3D grid (legacy method without texture sampler)
-     * @param mesh The mesh data to voxelize
-     * @param resolution The resolution of the voxel grid (e.g., 32 = 32x32x32)
-     * @return A voxel grid
+     * A vertex with position and UV coordinates
      */
+    private static class Vertex {
+        Vec3 pos;
+        double u, v;
+        
+        Vertex(Vec3 pos, double u, double v) {
+            this.pos = pos;
+            this.u = u;
+            this.v = v;
+        }
+        
+        Vertex copy() {
+            return new Vertex(pos.copy(), u, v);
+        }
+        
+        /**
+         * Linear interpolation between two vertices (position and UVs)
+         */
+        static Vertex lerp(Vertex a, Vertex b, double t) {
+            return new Vertex(
+                Vec3.lerp(a.pos, b.pos, t),
+                a.u + (b.u - a.u) * t,
+                a.v + (b.v - a.v) * t
+            );
+        }
+    }
+    
+    /**
+     * Represents a polygon (triangle or clipped result) with vertices and UVs
+     */
+    private static class Polygon {
+        List<Vertex> vertices;
+        
+        Polygon() {
+            this.vertices = new ArrayList<>();
+        }
+        
+        Polygon(Vertex v0, Vertex v1, Vertex v2) {
+            this.vertices = new ArrayList<>();
+            vertices.add(v0);
+            vertices.add(v1);
+            vertices.add(v2);
+        }
+        
+        void addVertex(Vertex v) {
+            vertices.add(v);
+        }
+        
+        int size() {
+            return vertices.size();
+        }
+        
+        boolean isEmpty() {
+            return vertices.size() < 3;
+        }
+        
+        /**
+         * Computes the area of this 3D polygon using the cross product method
+         */
+        double computeArea() {
+            if (vertices.size() < 3) return 0;
+            
+            // Use the Newell method for 3D polygon area
+            // Sum cross products of edges from first vertex
+            Vec3 sum = new Vec3(0, 0, 0);
+            Vertex v0 = vertices.get(0);
+            
+            for (int i = 1; i < vertices.size() - 1; i++) {
+                Vertex v1 = vertices.get(i);
+                Vertex v2 = vertices.get(i + 1);
+                
+                Vec3 e1 = Vec3.sub(v1.pos, v0.pos);
+                Vec3 e2 = Vec3.sub(v2.pos, v0.pos);
+                Vec3 cross = Vec3.cross(e1, e2);
+                
+                sum.x += cross.x;
+                sum.y += cross.y;
+                sum.z += cross.z;
+            }
+            
+            return sum.length() * 0.5;
+        }
+        
+        /**
+         * Computes the centroid UV coordinates of this polygon
+         */
+        double[] computeCentroidUV() {
+            if (vertices.isEmpty()) return new double[] {0, 0};
+            
+            double sumU = 0, sumV = 0;
+            for (Vertex v : vertices) {
+                sumU += v.u;
+                sumV += v.v;
+            }
+            return new double[] {sumU / vertices.size(), sumV / vertices.size()};
+        }
+    }
+    
+    /**
+     * Clips a polygon against a plane using Sutherland-Hodgman algorithm.
+     * 
+     * @param polygon The polygon to clip
+     * @param planeNormal The plane normal (points to the "inside" half-space)
+     * @param planeD The plane distance (plane equation: dot(normal, point) + d = 0)
+     * @return The clipped polygon (may be empty if entirely outside)
+     */
+    private static Polygon clipPolygonAgainstPlane(Polygon polygon, Vec3 planeNormal, double planeD) {
+        if (polygon.isEmpty()) return polygon;
+        
+        Polygon result = new Polygon();
+        int n = polygon.size();
+        
+        for (int i = 0; i < n; i++) {
+            Vertex current = polygon.vertices.get(i);
+            Vertex next = polygon.vertices.get((i + 1) % n);
+            
+            // Signed distance to plane (positive = inside, negative = outside)
+            double distCurrent = Vec3.dot(planeNormal, current.pos) + planeD;
+            double distNext = Vec3.dot(planeNormal, next.pos) + planeD;
+            
+            boolean currentInside = distCurrent >= 0;
+            boolean nextInside = distNext >= 0;
+            
+            if (currentInside) {
+                // Current vertex is inside, add it
+                result.addVertex(current.copy());
+            }
+            
+            // Check if edge crosses the plane
+            if (currentInside != nextInside) {
+                // Compute intersection point
+                double t = distCurrent / (distCurrent - distNext);
+                t = Math.max(0, Math.min(1, t)); // Clamp for numerical stability
+                Vertex intersection = Vertex.lerp(current, next, t);
+                result.addVertex(intersection);
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Clips a polygon against a voxel's 6 faces.
+     * Returns the portion of the polygon that lies inside the voxel.
+     * 
+     * @param polygon The polygon to clip
+     * @param voxelMin Minimum corner of the voxel (x, y, z)
+     * @param voxelMax Maximum corner of the voxel (x+1, y+1, z+1)
+     * @return The clipped polygon (empty if triangle doesn't intersect voxel)
+     */
+    private static Polygon clipPolygonAgainstVoxel(Polygon polygon, Vec3 voxelMin, Vec3 voxelMax) {
+        // Clip against all 6 faces of the voxel
+        // Each face is defined by a normal pointing inward and a distance
+        
+        // -X face (normal = +X, keeps points where x >= voxelMin.x)
+        polygon = clipPolygonAgainstPlane(polygon, new Vec3(1, 0, 0), -voxelMin.x);
+        if (polygon.isEmpty()) return polygon;
+        
+        // +X face (normal = -X, keeps points where x <= voxelMax.x)
+        polygon = clipPolygonAgainstPlane(polygon, new Vec3(-1, 0, 0), voxelMax.x);
+        if (polygon.isEmpty()) return polygon;
+        
+        // -Y face (normal = +Y, keeps points where y >= voxelMin.y)
+        polygon = clipPolygonAgainstPlane(polygon, new Vec3(0, 1, 0), -voxelMin.y);
+        if (polygon.isEmpty()) return polygon;
+        
+        // +Y face (normal = -Y, keeps points where y <= voxelMax.y)
+        polygon = clipPolygonAgainstPlane(polygon, new Vec3(0, -1, 0), voxelMax.y);
+        if (polygon.isEmpty()) return polygon;
+        
+        // -Z face (normal = +Z, keeps points where z >= voxelMin.z)
+        polygon = clipPolygonAgainstPlane(polygon, new Vec3(0, 0, 1), -voxelMin.z);
+        if (polygon.isEmpty()) return polygon;
+        
+        // +Z face (normal = -Z, keeps points where z <= voxelMax.z)
+        polygon = clipPolygonAgainstPlane(polygon, new Vec3(0, 0, -1), voxelMax.z);
+        
+        return polygon;
+    }
+    
+    /**
+     * Stores the best (largest area) triangle contribution for each voxel
+     */
+    private static class VoxelCandidate {
+        double area;
+        int color;
+        
+        VoxelCandidate(double area, int color) {
+            this.area = area;
+            this.color = color;
+        }
+    }
+    
+    /**
+     * Triangle data with UV coordinates
+     */
+    private static class Triangle {
+        Vertex v0, v1, v2;
+        int color0, color1, color2; // Fallback vertex colors
+        
+        Triangle(Vertex v0, Vertex v1, Vertex v2, int color0, int color1, int color2) {
+            this.v0 = v0;
+            this.v1 = v1;
+            this.v2 = v2;
+            this.color0 = color0;
+            this.color1 = color1;
+            this.color2 = color2;
+        }
+        
+        Polygon toPolygon() {
+            return new Polygon(v0.copy(), v1.copy(), v2.copy());
+        }
+        
+        boolean hasValidUVs() {
+            return (v0.u != 0 || v0.v != 0 || v1.u != 0 || v1.v != 0 || v2.u != 0 || v2.v != 0);
+        }
+    }
+    
+    // Legacy method for compatibility
     public static VoxelGrid voxelize(GLBParser.MeshData mesh, int resolution) {
         return voxelize(mesh, resolution, null);
     }
     
     /**
-     * Voxelizes a mesh into a 3D grid with proper per-voxel texture sampling
-     * @param mesh The mesh data to voxelize
-     * @param resolution The resolution of the voxel grid (e.g., 32 = 32x32x32)
-     * @param textureSampler Optional texture sampler for per-voxel color sampling
-     * @return A voxel grid
+     * Voxelizes a mesh using triangle-voxel clipping with "max area wins" strategy.
+     * This is the obj2voxel approach - mathematically correct voxelization.
      */
     public static VoxelGrid voxelize(GLBParser.MeshData mesh, int resolution, TextureSampler textureSampler) {
-        LOGGER.info("Voxelizing mesh with resolution {}x{}x{}", resolution, resolution, resolution);
+        LOGGER.info("Voxelizing mesh with resolution {}x{}x{} using AREA-BASED clipping (obj2voxel approach)", 
+            resolution, resolution, resolution);
         
         float[] vertices = mesh.vertices();
         int[] indices = mesh.indices();
@@ -105,231 +327,171 @@ public class Voxelizer {
         boolean hasUVs = uvs != null && uvs.length > 0;
         boolean hasTexture = textureSampler != null && hasUVs;
         
-        LOGGER.info("Voxelization mode: {} (hasUVs={}, hasTexture={})", 
-            hasTexture ? "PER-VOXEL TEXTURE SAMPLING" : "VERTEX COLOR INTERPOLATION",
-            hasUVs, textureSampler != null);
+        LOGGER.info("Mode: {} (hasUVs={}, hasTexture={})", 
+            hasTexture ? "TEXTURE SAMPLING" : "VERTEX COLORS", hasUVs, hasTexture);
         
         if (vertices.length == 0) {
-            LOGGER.warn("Empty mesh, returning empty voxel grid");
             return new VoxelGrid(new HashMap<>(), resolution);
         }
         
         // Calculate bounding box
-        float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY, minZ = Float.POSITIVE_INFINITY;
-        float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY, maxZ = Float.NEGATIVE_INFINITY;
+        double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE, minZ = Double.MAX_VALUE;
+        double maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE, maxZ = -Double.MAX_VALUE;
         
         for (int i = 0; i < vertices.length; i += 3) {
-            float x = vertices[i];
-            float y = vertices[i + 1];
-            float z = vertices[i + 2];
-            
-            minX = Math.min(minX, x);
-            minY = Math.min(minY, y);
-            minZ = Math.min(minZ, z);
-            maxX = Math.max(maxX, x);
-            maxY = Math.max(maxY, y);
-            maxZ = Math.max(maxZ, z);
+            minX = Math.min(minX, vertices[i]);
+            minY = Math.min(minY, vertices[i + 1]);
+            minZ = Math.min(minZ, vertices[i + 2]);
+            maxX = Math.max(maxX, vertices[i]);
+            maxY = Math.max(maxY, vertices[i + 1]);
+            maxZ = Math.max(maxZ, vertices[i + 2]);
         }
         
-        LOGGER.info("Bounding box: ({}, {}, {}) to ({}, {}, {})", minX, minY, minZ, maxX, maxY, maxZ);
-        
-        float sizeX = maxX - minX;
-        float sizeY = maxY - minY;
-        float sizeZ = maxZ - minZ;
-        float maxSize = Math.max(Math.max(sizeX, sizeY), sizeZ);
+        double sizeX = maxX - minX;
+        double sizeY = maxY - minY;
+        double sizeZ = maxZ - minZ;
+        double maxSize = Math.max(Math.max(sizeX, sizeY), sizeZ);
         
         if (maxSize == 0) {
-            LOGGER.warn("Zero-sized mesh, returning empty voxel grid");
             return new VoxelGrid(new HashMap<>(), resolution);
         }
         
-        // Scale factor to fit mesh in voxel grid
-        float scale = (resolution - 1) / maxSize;
+        // Scale to fit in resolution grid with 1 voxel padding
+        double scale = (resolution - 2) / maxSize;
+        double offsetX = -minX * scale + 1;
+        double offsetY = -minY * scale + 1;
+        double offsetZ = -minZ * scale + 1;
         
-        LOGGER.info("Scale factor: {}", scale);
+        LOGGER.info("Bounds: ({},{},{}) to ({},{},{}), scale: {}", 
+            minX, minY, minZ, maxX, maxY, maxZ, scale);
         
-        // Create voxel grid and distance tracking for "closest triangle wins"
-        Map<BlockPos, Integer> voxels = new HashMap<>();
-        Map<BlockPos, Float> voxelDistances = new HashMap<>(); // Track distance for each voxel
-        
-        // Build list of triangles with UV coordinates
+        // Build triangles list
         List<Triangle> triangles = new ArrayList<>();
         for (int i = 0; i < indices.length; i += 3) {
             int idx0 = indices[i];
             int idx1 = indices[i + 1];
             int idx2 = indices[i + 2];
             
-            // Get UV coordinates for each vertex (if available)
-            float u0 = hasUVs ? uvs[idx0 * 2] : 0;
-            float v0 = hasUVs ? uvs[idx0 * 2 + 1] : 0;
-            float u1 = hasUVs ? uvs[idx1 * 2] : 0;
-            float v1 = hasUVs ? uvs[idx1 * 2 + 1] : 0;
-            float u2 = hasUVs ? uvs[idx2 * 2] : 0;
-            float v2 = hasUVs ? uvs[idx2 * 2 + 1] : 0;
+            // Transform vertices to voxel grid space
+            Vec3 p0 = new Vec3(
+                vertices[idx0 * 3] * scale + offsetX,
+                vertices[idx0 * 3 + 1] * scale + offsetY,
+                vertices[idx0 * 3 + 2] * scale + offsetZ
+            );
+            Vec3 p1 = new Vec3(
+                vertices[idx1 * 3] * scale + offsetX,
+                vertices[idx1 * 3 + 1] * scale + offsetY,
+                vertices[idx1 * 3 + 2] * scale + offsetZ
+            );
+            Vec3 p2 = new Vec3(
+                vertices[idx2 * 3] * scale + offsetX,
+                vertices[idx2 * 3 + 1] * scale + offsetY,
+                vertices[idx2 * 3 + 2] * scale + offsetZ
+            );
             
-            triangles.add(new Triangle(
-                vertices[idx0 * 3], vertices[idx0 * 3 + 1], vertices[idx0 * 3 + 2],
-                vertices[idx1 * 3], vertices[idx1 * 3 + 1], vertices[idx1 * 3 + 2],
-                vertices[idx2 * 3], vertices[idx2 * 3 + 1], vertices[idx2 * 3 + 2],
-                u0, v0, u1, v1, u2, v2,
-                colors[idx0], colors[idx1], colors[idx2]
-            ));
+            // Get UVs
+            double u0 = hasUVs ? uvs[idx0 * 2] : 0;
+            double v0 = hasUVs ? uvs[idx0 * 2 + 1] : 0;
+            double u1 = hasUVs ? uvs[idx1 * 2] : 0;
+            double v1 = hasUVs ? uvs[idx1 * 2 + 1] : 0;
+            double u2 = hasUVs ? uvs[idx2 * 2] : 0;
+            double v2 = hasUVs ? uvs[idx2 * 2 + 1] : 0;
+            
+            Vertex vert0 = new Vertex(p0, u0, v0);
+            Vertex vert1 = new Vertex(p1, u1, v1);
+            Vertex vert2 = new Vertex(p2, u2, v2);
+            
+            triangles.add(new Triangle(vert0, vert1, vert2, colors[idx0], colors[idx1], colors[idx2]));
         }
         
-        LOGGER.info("Voxelizing {} triangles using surface rasterization (closest-triangle-wins)", triangles.size());
+        LOGGER.info("Processing {} triangles with area-based clipping...", triangles.size());
         
-        // Track texture sampling stats
-        int textureSamples = 0;
-        int colorInterpolations = 0;
-        int closerTriangleUpdates = 0;
+        // Track best candidate for each voxel (MAX AREA WINS)
+        Map<BlockPos, VoxelCandidate> candidates = new HashMap<>();
         
-        // Surface voxelization: rasterize each triangle's surface
+        // Stats
+        int trianglesProcessed = 0;
+        int voxelsUpdated = 0;
+        int clipsPerformed = 0;
+        
+        // Process each triangle
         for (Triangle tri : triangles) {
-            // Transform triangle to voxel space
-            int vx0 = (int) ((tri.x0 - minX) * scale);
-            int vy0 = (int) ((tri.y0 - minY) * scale);
-            int vz0 = (int) ((tri.z0 - minZ) * scale);
+            trianglesProcessed++;
             
-            int vx1 = (int) ((tri.x1 - minX) * scale);
-            int vy1 = (int) ((tri.y1 - minY) * scale);
-            int vz1 = (int) ((tri.z1 - minZ) * scale);
+            // Get bounding box in voxel coordinates
+            int minVX = (int) Math.floor(Math.min(tri.v0.pos.x, Math.min(tri.v1.pos.x, tri.v2.pos.x)));
+            int minVY = (int) Math.floor(Math.min(tri.v0.pos.y, Math.min(tri.v1.pos.y, tri.v2.pos.y)));
+            int minVZ = (int) Math.floor(Math.min(tri.v0.pos.z, Math.min(tri.v1.pos.z, tri.v2.pos.z)));
+            int maxVX = (int) Math.ceil(Math.max(tri.v0.pos.x, Math.max(tri.v1.pos.x, tri.v2.pos.x)));
+            int maxVY = (int) Math.ceil(Math.max(tri.v0.pos.y, Math.max(tri.v1.pos.y, tri.v2.pos.y)));
+            int maxVZ = (int) Math.ceil(Math.max(tri.v0.pos.z, Math.max(tri.v1.pos.z, tri.v2.pos.z)));
             
-            int vx2 = (int) ((tri.x2 - minX) * scale);
-            int vy2 = (int) ((tri.y2 - minY) * scale);
-            int vz2 = (int) ((tri.z2 - minZ) * scale);
+            // Clamp to grid
+            minVX = Math.max(0, minVX);
+            minVY = Math.max(0, minVY);
+            minVZ = Math.max(0, minVZ);
+            maxVX = Math.min(resolution - 1, maxVX);
+            maxVY = Math.min(resolution - 1, maxVY);
+            maxVZ = Math.min(resolution - 1, maxVZ);
             
-            // Get bounding box of triangle in voxel space
-            int minVX = Math.max(0, Math.min(Math.min(vx0, vx1), vx2));
-            int maxVX = Math.min(resolution - 1, Math.max(Math.max(vx0, vx1), vx2));
-            int minVY = Math.max(0, Math.min(Math.min(vy0, vy1), vy2));
-            int maxVY = Math.min(resolution - 1, Math.max(Math.max(vy0, vy1), vy2));
-            int minVZ = Math.max(0, Math.min(Math.min(vz0, vz1), vz2));
-            int maxVZ = Math.min(resolution - 1, Math.max(Math.max(vz0, vz1), vz2));
-            
-            // Rasterize triangle within bounding box
+            // Process each voxel in the bounding box
             for (int vx = minVX; vx <= maxVX; vx++) {
                 for (int vy = minVY; vy <= maxVY; vy++) {
                     for (int vz = minVZ; vz <= maxVZ; vz++) {
-                        // Calculate voxel center in world space
-                        float worldX = minX + (vx + 0.5f) / scale;
-                        float worldY = minY + (vy + 0.5f) / scale;
-                        float worldZ = minZ + (vz + 0.5f) / scale;
+                        // Clip triangle against this voxel
+                        Polygon clipped = clipPolygonAgainstVoxel(
+                            tri.toPolygon(),
+                            new Vec3(vx, vy, vz),
+                            new Vec3(vx + 1, vy + 1, vz + 1)
+                        );
+                        clipsPerformed++;
                         
-                        // Calculate barycentric coordinates
-                        float[] bary = new float[3];
-                        float dist = distanceToTriangle(worldX, worldY, worldZ, tri, bary);
+                        if (clipped.isEmpty()) continue;
                         
-                        // Only fill if very close to surface (tight threshold for sharp features)
-                        float voxelSize = 1.0f / scale;
-                        if (dist < voxelSize * 0.866f) { // sqrt(3)/2 ≈ 0.866 (half voxel diagonal)
-                            BlockPos pos = new BlockPos(vx, vy, vz);
-                            
-                            // CLOSEST TRIANGLE WINS: Only update if this triangle is closer
-                            float currentDist = voxelDistances.getOrDefault(pos, Float.MAX_VALUE);
-                            if (dist < currentDist) {
-                                // Track if this is an update (closer triangle replaced existing)
-                                if (currentDist < Float.MAX_VALUE) {
-                                    closerTriangleUpdates++;
-                                }
-                                
-                                int color;
-                                
-                                // Sample texture at interpolated UV coordinates
-                                if (hasTexture && tri.hasValidUVs()) {
-                                    // Interpolate UV coordinates using barycentric coords
-                                    float[] uv = tri.interpolateUV(bary[0], bary[1], bary[2]);
-                                    // Sample texture at this specific UV position
-                                    color = textureSampler.sample(uv[0], uv[1]);
-                                    textureSamples++;
-                                } else {
-                                    // Fallback: interpolate vertex colors
-                                    color = tri.interpolateColor(bary[0], bary[1], bary[2]);
-                                    colorInterpolations++;
-                                }
-                                
-                                voxels.put(pos, color);
-                                voxelDistances.put(pos, dist);
-                            }
+                        // Compute area of clipped polygon
+                        double area = clipped.computeArea();
+                        if (area < 1e-10) continue;
+                        
+                        // Sample color at centroid of clipped polygon
+                        int color;
+                        if (hasTexture && tri.hasValidUVs()) {
+                            double[] centroidUV = clipped.computeCentroidUV();
+                            color = textureSampler.sample((float) centroidUV[0], (float) centroidUV[1]);
+                        } else {
+                            // Fallback: average vertex colors
+                            int r = ((tri.color0 >> 16) & 0xFF + (tri.color1 >> 16) & 0xFF + (tri.color2 >> 16) & 0xFF) / 3;
+                            int g = ((tri.color0 >> 8) & 0xFF + (tri.color1 >> 8) & 0xFF + (tri.color2 >> 8) & 0xFF) / 3;
+                            int b = ((tri.color0) & 0xFF + (tri.color1) & 0xFF + (tri.color2) & 0xFF) / 3;
+                            color = (r << 16) | (g << 8) | b;
+                        }
+                        
+                        // MAX AREA WINS: Only update if this triangle has larger area in this voxel
+                        BlockPos pos = new BlockPos(vx, vy, vz);
+                        VoxelCandidate existing = candidates.get(pos);
+                        
+                        if (existing == null || area > existing.area) {
+                            candidates.put(pos, new VoxelCandidate(area, color));
+                            voxelsUpdated++;
                         }
                     }
                 }
             }
+            
+            // Progress logging
+            if (trianglesProcessed % 10000 == 0) {
+                LOGGER.info("Progress: {}/{} triangles, {} voxels", trianglesProcessed, triangles.size(), candidates.size());
+            }
         }
         
-        LOGGER.info("Voxelized mesh: {} voxels (texture samples: {}, color interpolations: {}, closer-triangle updates: {})", 
-            voxels.size(), textureSamples, colorInterpolations, closerTriangleUpdates);
+        // Convert candidates to final voxel map
+        Map<BlockPos, Integer> voxels = new HashMap<>();
+        for (Map.Entry<BlockPos, VoxelCandidate> entry : candidates.entrySet()) {
+            voxels.put(entry.getKey(), entry.getValue().color);
+        }
+        
+        LOGGER.info("Voxelization complete: {} voxels from {} triangles", voxels.size(), triangles.size());
+        LOGGER.info("Stats: {} clips performed, {} voxel updates", clipsPerformed, voxelsUpdated);
         
         return new VoxelGrid(voxels, resolution);
     }
-    
-    /**
-     * Calculates the distance from a point to a triangle and returns barycentric coordinates
-     * @param px Point X coordinate
-     * @param py Point Y coordinate
-     * @param pz Point Z coordinate
-     * @param tri Triangle
-     * @param bary Output array for barycentric coordinates [u, v, w]
-     * @return Distance from point to triangle
-     */
-    private static float distanceToTriangle(float px, float py, float pz, Triangle tri, float[] bary) {
-        // Vector from vertex 0 to point
-        float dx = px - tri.x0;
-        float dy = py - tri.y0;
-        float dz = pz - tri.z0;
-        
-        // Triangle edges
-        float e1x = tri.x1 - tri.x0;
-        float e1y = tri.y1 - tri.y0;
-        float e1z = tri.z1 - tri.z0;
-        
-        float e2x = tri.x2 - tri.x0;
-        float e2y = tri.y2 - tri.y0;
-        float e2z = tri.z2 - tri.z0;
-        
-        // Calculate barycentric coordinates
-        float d00 = e1x * e1x + e1y * e1y + e1z * e1z;
-        float d01 = e1x * e2x + e1y * e2y + e1z * e2z;
-        float d11 = e2x * e2x + e2y * e2y + e2z * e2z;
-        float d20 = dx * e1x + dy * e1y + dz * e1z;
-        float d21 = dx * e2x + dy * e2y + dz * e2z;
-        
-        float denom = d00 * d11 - d01 * d01;
-        if (Math.abs(denom) < 1e-8f) {
-            // Degenerate triangle
-            bary[0] = 1.0f;
-            bary[1] = 0.0f;
-            bary[2] = 0.0f;
-            return Float.MAX_VALUE;
-        }
-        
-        float v = (d11 * d20 - d01 * d21) / denom;
-        float w = (d00 * d21 - d01 * d20) / denom;
-        float u = 1.0f - v - w;
-        
-        // Clamp barycentric coordinates to triangle
-        bary[0] = Math.max(0, Math.min(1, u));
-        bary[1] = Math.max(0, Math.min(1, v));
-        bary[2] = Math.max(0, Math.min(1, w));
-        
-        // Normalize if outside triangle
-        float sum = bary[0] + bary[1] + bary[2];
-        if (sum > 0) {
-            bary[0] /= sum;
-            bary[1] /= sum;
-            bary[2] /= sum;
-        }
-        
-        // Calculate closest point on triangle
-        float closestX = tri.x0 * bary[0] + tri.x1 * bary[1] + tri.x2 * bary[2];
-        float closestY = tri.y0 * bary[0] + tri.y1 * bary[1] + tri.y2 * bary[2];
-        float closestZ = tri.z0 * bary[0] + tri.z1 * bary[1] + tri.z2 * bary[2];
-        
-        // Distance from point to closest point
-        float distX = px - closestX;
-        float distY = py - closestY;
-        float distZ = pz - closestZ;
-        
-        return (float) Math.sqrt(distX * distX + distY * distY + distZ * distZ);
-    }
-    
 }
