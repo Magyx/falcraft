@@ -14,16 +14,21 @@ import org.joml.Matrix4f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Map;
+
 /**
- * Renders a bounding box outline for the placement preview system
- * Extremely lightweight - just draws the edges of the structure bounds
+ * Renders ghost blocks for the placement preview system.
+ * Shows the actual structure shape using colored transparent blocks.
  */
 public class GhostBlockRenderer {
     private static final Logger LOGGER = LoggerFactory.getLogger("GhostBlockRenderer");
     
+    // Ghost block rendering settings
+    private static final float GHOST_ALPHA = 0.6f; // Transparency for ghost blocks
+    
     /**
-     * Renders a simple bounding box outline showing where the structure will be placed
-     * Much more performant than rendering all ghost blocks
+     * Renders ghost blocks showing the actual structure shape with colors.
+     * Uses pre-computed surface voxels for performance.
      */
     public static void render(PoseStack poseStack, MultiBufferSource bufferSource, float partialTick) {
         if (!PlacementPreview.isPlacementActive()) {
@@ -66,29 +71,22 @@ public class GhostBlockRenderer {
         Matrix4f matrix = poseStack.last().pose();
         Tesselator tesselator = Tesselator.getInstance();
         
-        // First, draw the box faces (sides are green, bottom is yellow)
-        BufferBuilder faceBuffer = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-        drawBoxFacesWithDistinctBottom(faceBuffer, matrix, box);
-        BufferUploader.drawWithShader(faceBuffer.buildOrThrow());
+        // Render surface voxels as ghost blocks
+        Map<BlockPos, Integer> surfaceVoxels = PlacementPreview.getSurfaceVoxels();
+        if (surfaceVoxels != null && !surfaceVoxels.isEmpty()) {
+            BufferBuilder ghostBuffer = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
+            renderGhostBlocks(ghostBuffer, matrix, surfaceVoxels, origin, cameraPos, size);
+            BufferUploader.drawWithShader(ghostBuffer.buildOrThrow());
+        }
         
-        // Draw bright outline edges
+        // Draw bounding box outline (subtle, since we have ghost blocks)
         BufferBuilder lineBuffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
-        drawBoxEdges(lineBuffer, matrix, box, 0.0f, 1.0f, 0.0f, 1.0f); // Bright green
+        drawBoxEdges(lineBuffer, matrix, box, 0.2f, 0.8f, 0.2f, 0.4f); // Dim green
         BufferUploader.drawWithShader(lineBuffer.buildOrThrow());
         
-        // Draw filled ground plane - shows EXACTLY where structure touches ground
-        BufferBuilder groundPlaneBuffer = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-        drawFilledGroundPlane(groundPlaneBuffer, matrix, box);
-        BufferUploader.drawWithShader(groundPlaneBuffer.buildOrThrow());
-        
-        // Draw vertical corner pillars - bright white for maximum visibility
-        BufferBuilder pillarBuffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
-        drawVerticalPillars(pillarBuffer, matrix, box, origin, size);
-        BufferUploader.drawWithShader(pillarBuffer.buildOrThrow());
-        
-        // Draw ground footprint outline - bright white outline ON the ground
+        // Draw ground footprint outline
         BufferBuilder groundBuffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
-        drawGroundFootprint(groundBuffer, matrix, box, 1.0f, 1.0f, 1.0f, 1.0f); // Bright white
+        drawGroundFootprint(groundBuffer, matrix, box, 1.0f, 1.0f, 0.3f, 0.8f); // Yellow
         BufferUploader.drawWithShader(groundBuffer.buildOrThrow());
         
         RenderSystem.enableDepthTest();
@@ -96,6 +94,82 @@ public class GhostBlockRenderer {
         RenderSystem.disableBlend();
         
         poseStack.popPose();
+    }
+    
+    /**
+     * Renders surface voxels as transparent colored cubes
+     */
+    private static void renderGhostBlocks(BufferBuilder buffer, Matrix4f matrix,
+                                           Map<BlockPos, Integer> surfaceVoxels,
+                                           BlockPos origin, Vec3 cameraPos, int gridSize) {
+        int rotation = PlacementPreview.getRotationIndex();
+        
+        for (Map.Entry<BlockPos, Integer> entry : surfaceVoxels.entrySet()) {
+            BlockPos voxelPos = entry.getKey();
+            int color = entry.getValue();
+            
+            // Apply rotation to the voxel position
+            BlockPos rotatedPos = PlacementPreview.rotatePosition(voxelPos, gridSize);
+            
+            // Calculate world position relative to camera
+            float x = (float) (origin.getX() + rotatedPos.getX() - cameraPos.x);
+            float y = (float) (origin.getY() + rotatedPos.getY() - cameraPos.y);
+            float z = (float) (origin.getZ() + rotatedPos.getZ() - cameraPos.z);
+            
+            // Extract color components
+            float r = ((color >> 16) & 0xFF) / 255.0f;
+            float g = ((color >> 8) & 0xFF) / 255.0f;
+            float b = (color & 0xFF) / 255.0f;
+            
+            // Draw a 1x1x1 ghost cube at this position
+            drawGhostCube(buffer, matrix, x, y, z, r, g, b, GHOST_ALPHA);
+        }
+    }
+    
+    /**
+     * Draws a single transparent cube (6 faces)
+     */
+    private static void drawGhostCube(BufferBuilder buffer, Matrix4f matrix,
+                                       float x, float y, float z,
+                                       float r, float g, float b, float a) {
+        float x1 = x, y1 = y, z1 = z;
+        float x2 = x + 1, y2 = y + 1, z2 = z + 1;
+        
+        // Bottom face (Y-)
+        buffer.addVertex(matrix, x1, y1, z1).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2, y1, z1).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2, y1, z2).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x1, y1, z2).setColor(r, g, b, a);
+        
+        // Top face (Y+)
+        buffer.addVertex(matrix, x1, y2, z1).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x1, y2, z2).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2, y2, z2).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2, y2, z1).setColor(r, g, b, a);
+        
+        // North face (Z-)
+        buffer.addVertex(matrix, x1, y1, z1).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x1, y2, z1).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2, y2, z1).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2, y1, z1).setColor(r, g, b, a);
+        
+        // South face (Z+)
+        buffer.addVertex(matrix, x1, y1, z2).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2, y1, z2).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2, y2, z2).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x1, y2, z2).setColor(r, g, b, a);
+        
+        // West face (X-)
+        buffer.addVertex(matrix, x1, y1, z1).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x1, y1, z2).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x1, y2, z2).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x1, y2, z1).setColor(r, g, b, a);
+        
+        // East face (X+)
+        buffer.addVertex(matrix, x2, y1, z1).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2, y2, z1).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2, y2, z2).setColor(r, g, b, a);
+        buffer.addVertex(matrix, x2, y1, z2).setColor(r, g, b, a);
     }
     
     /**

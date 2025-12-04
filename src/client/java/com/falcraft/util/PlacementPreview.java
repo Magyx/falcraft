@@ -22,13 +22,17 @@ public class PlacementPreview {
     private static final Logger LOGGER = LoggerFactory.getLogger("PlacementPreview");
     
     private static Voxelizer.VoxelGrid pendingGrid = null;
+    private static Map<BlockPos, Integer> surfaceVoxels = null; // Pre-computed surface for preview
     private static boolean isActive = false;
+    private static int rotationIndex = 0; // 0=0°, 1=90°, 2=180°, 3=270° (clockwise around Y axis)
     
     // Animated placement state
     private static boolean isAnimatingPlacement = false;
     private static List<List<Map.Entry<BlockPos, Integer>>> layersByY = null;
     private static int currentLayerIndex = 0;
     private static BlockPos placementOrigin = null;
+    private static int placementRotation = 0; // Rotation to apply during placement
+    private static int placementGridSize = 0; // Grid size for rotation calculation
     private static final int LAYERS_PER_TICK = 3; // Place 3 Y-levels per tick for smooth animation
     
     /**
@@ -38,7 +42,88 @@ public class PlacementPreview {
     public static void startPlacement(Voxelizer.VoxelGrid grid) {
         pendingGrid = grid;
         isActive = true;
-        LOGGER.info("Started placement preview mode with {} voxels", grid.voxels().size());
+        rotationIndex = 0; // Reset rotation
+        
+        // Pre-compute surface voxels for preview rendering
+        surfaceVoxels = extractSurfaceVoxels(grid);
+        LOGGER.info("Started placement preview mode with {} voxels, {} surface voxels", 
+            grid.voxels().size(), surfaceVoxels.size());
+    }
+    
+    /**
+     * Rotates the structure 90 degrees clockwise (when viewed from above)
+     */
+    public static void rotate() {
+        if (!isActive) return;
+        rotationIndex = (rotationIndex + 1) % 4;
+        LOGGER.info("Rotated structure to {} degrees", rotationIndex * 90);
+    }
+    
+    /**
+     * Gets the current rotation index (0=0°, 1=90°, 2=180°, 3=270°)
+     */
+    public static int getRotationIndex() {
+        return rotationIndex;
+    }
+    
+    /**
+     * Transforms a voxel position based on current rotation.
+     * Rotates around the Y axis (up), keeping the structure centered.
+     * @param pos Original voxel position (in grid coordinates)
+     * @param gridSize The size of the grid
+     * @return Rotated position
+     */
+    public static BlockPos rotatePosition(BlockPos pos, int gridSize) {
+        if (rotationIndex == 0) {
+            return pos; // No rotation
+        }
+        
+        int x = pos.getX();
+        int y = pos.getY();
+        int z = pos.getZ();
+        int s = gridSize - 1; // Max coordinate
+        
+        return switch (rotationIndex) {
+            case 1 -> new BlockPos(s - z, y, x);      // 90° CW
+            case 2 -> new BlockPos(s - x, y, s - z);  // 180°
+            case 3 -> new BlockPos(z, y, s - x);      // 270° CW (90° CCW)
+            default -> pos;
+        };
+    }
+    
+    /**
+     * Extracts only the surface voxels (voxels with at least one exposed face)
+     * This is much smaller than the full voxel set for preview rendering
+     */
+    private static Map<BlockPos, Integer> extractSurfaceVoxels(Voxelizer.VoxelGrid grid) {
+        Map<BlockPos, Integer> surface = new HashMap<>();
+        Set<BlockPos> allVoxels = grid.voxels().keySet();
+        
+        for (Map.Entry<BlockPos, Integer> entry : grid.voxels().entrySet()) {
+            BlockPos pos = entry.getKey();
+            
+            // Check if any face is exposed (neighbor is not a voxel)
+            boolean isExposed = 
+                !allVoxels.contains(pos.above()) ||
+                !allVoxels.contains(pos.below()) ||
+                !allVoxels.contains(pos.north()) ||
+                !allVoxels.contains(pos.south()) ||
+                !allVoxels.contains(pos.east()) ||
+                !allVoxels.contains(pos.west());
+            
+            if (isExposed) {
+                surface.put(pos, entry.getValue());
+            }
+        }
+        
+        return surface;
+    }
+    
+    /**
+     * @return The surface voxels for preview rendering, or null if not available
+     */
+    public static Map<BlockPos, Integer> getSurfaceVoxels() {
+        return surfaceVoxels;
     }
     
     /**
@@ -46,18 +131,21 @@ public class PlacementPreview {
      */
     public static void confirmPlacement() {
         if (isActive && pendingGrid != null) {
-            LOGGER.info("Starting animated placement of {} blocks", pendingGrid.voxels().size());
+            LOGGER.info("Starting animated placement of {} blocks (rotation: {}°)", 
+                pendingGrid.voxels().size(), rotationIndex * 90);
             
-            // Calculate placement origin
+            // Calculate placement origin and save rotation state
             placementOrigin = calculatePreviewOrigin();
+            placementRotation = rotationIndex;
+            placementGridSize = pendingGrid.size();
             
             // Sort voxels by Y coordinate (bottom to top)
+            // Note: Y doesn't change with Y-axis rotation, so original Y is fine
             Map<Integer, List<Map.Entry<BlockPos, Integer>>> voxelsByY = new TreeMap<>();
             
             for (Map.Entry<BlockPos, Integer> entry : pendingGrid.voxels().entrySet()) {
                 BlockPos voxelPos = entry.getKey();
                 int y = voxelPos.getY();
-                
                 voxelsByY.computeIfAbsent(y, k -> new ArrayList<>()).add(entry);
             }
             
@@ -69,6 +157,7 @@ public class PlacementPreview {
             // Exit preview mode (but keep animating)
             isActive = false;
             pendingGrid = null;
+            surfaceVoxels = null;
             
             LOGGER.info("Prepared {} layers for animated placement", layersByY.size());
         }
@@ -82,6 +171,7 @@ public class PlacementPreview {
             LOGGER.info("Cancelled placement preview");
             isActive = false;
             pendingGrid = null;
+            surfaceVoxels = null;
         }
     }
     
@@ -237,8 +327,11 @@ public class PlacementPreview {
                 BlockPos voxelPos = entry.getKey();
                 int color = entry.getValue();
                 
+                // Apply rotation to the voxel position
+                BlockPos rotatedPos = applyPlacementRotation(voxelPos);
+                
                 // Calculate world position
-                BlockPos worldPos = placementOrigin.offset(voxelPos);
+                BlockPos worldPos = placementOrigin.offset(rotatedPos);
                 
                 // Get the closest matching block
                 BlockState blockState = BlockMapper.getClosestBlock(color);
@@ -269,7 +362,30 @@ public class PlacementPreview {
         isAnimatingPlacement = false;
         layersByY = null;
         placementOrigin = null;
+        placementRotation = 0;
+        placementGridSize = 0;
         currentLayerIndex = 0;
+    }
+    
+    /**
+     * Applies the saved placement rotation to a voxel position
+     */
+    private static BlockPos applyPlacementRotation(BlockPos pos) {
+        if (placementRotation == 0) {
+            return pos;
+        }
+        
+        int x = pos.getX();
+        int y = pos.getY();
+        int z = pos.getZ();
+        int s = placementGridSize - 1;
+        
+        return switch (placementRotation) {
+            case 1 -> new BlockPos(s - z, y, x);      // 90° CW
+            case 2 -> new BlockPos(s - x, y, s - z);  // 180°
+            case 3 -> new BlockPos(z, y, s - x);      // 270° CW
+            default -> pos;
+        };
     }
     
     /**

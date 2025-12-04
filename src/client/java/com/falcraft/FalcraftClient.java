@@ -17,6 +17,7 @@ public class FalcraftClient implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("FalcraftClient");
     
     private static boolean wasRightClickPressed = false;
+    private static boolean wasRotateKeyPressed = false;
 
     @Override
     public void onInitializeClient() {
@@ -65,10 +66,26 @@ public class FalcraftClient implements ClientModInitializer {
                     );
                     LOGGER.info("Player confirmed placement - starting animated build");
                 }
-                
                 wasRightClickPressed = isRightClickPressed;
+                
+                // Detect R key for rotation
+                boolean isRotateKeyPressed = org.lwjgl.glfw.GLFW.glfwGetKey(
+                    Minecraft.getInstance().getWindow().getWindow(),
+                    org.lwjgl.glfw.GLFW.GLFW_KEY_R
+                ) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
+                
+                if (isRotateKeyPressed && !wasRotateKeyPressed) {
+                    PlacementPreview.rotate();
+                    int degrees = PlacementPreview.getRotationIndex() * 90;
+                    client.player.displayClientMessage(
+                        Component.literal("§e[fal] Rotated to " + degrees + "°"),
+                        true // Action bar message (less intrusive)
+                    );
+                }
+                wasRotateKeyPressed = isRotateKeyPressed;
             } else {
                 wasRightClickPressed = false;
+                wasRotateKeyPressed = false;
             }
         });
         LOGGER.info("Registered placement confirmation and animated placement handler");
