@@ -43,7 +43,16 @@ public class Voxelizer {
         }
         
         /**
-         * Interpolates color using barycentric coordinates
+         * Interpolates UV coordinates using barycentric coordinates
+         */
+        float[] interpolateUV(float bary0, float bary1, float bary2) {
+            float u = u0 * bary0 + u1 * bary1 + u2 * bary2;
+            float v = v0 * bary0 + v1 * bary1 + v2 * bary2;
+            return new float[] { u, v };
+        }
+        
+        /**
+         * Interpolates color using barycentric coordinates (fallback when no texture)
          */
         int interpolateColor(float bary0, float bary1, float bary2) {
             // Extract RGB components
@@ -58,20 +67,47 @@ public class Voxelizer {
             
             return (r << 16) | (g << 8) | b;
         }
+        
+        /**
+         * Checks if this triangle has valid UV coordinates
+         */
+        boolean hasValidUVs() {
+            // Check if at least one UV is non-zero (indicating valid texture mapping)
+            return (u0 != 0 || v0 != 0 || u1 != 0 || v1 != 0 || u2 != 0 || v2 != 0);
+        }
     }
     
     /**
-     * Voxelizes a mesh into a 3D grid
+     * Voxelizes a mesh into a 3D grid (legacy method without texture sampler)
      * @param mesh The mesh data to voxelize
      * @param resolution The resolution of the voxel grid (e.g., 32 = 32x32x32)
      * @return A voxel grid
      */
     public static VoxelGrid voxelize(GLBParser.MeshData mesh, int resolution) {
+        return voxelize(mesh, resolution, null);
+    }
+    
+    /**
+     * Voxelizes a mesh into a 3D grid with proper per-voxel texture sampling
+     * @param mesh The mesh data to voxelize
+     * @param resolution The resolution of the voxel grid (e.g., 32 = 32x32x32)
+     * @param textureSampler Optional texture sampler for per-voxel color sampling
+     * @return A voxel grid
+     */
+    public static VoxelGrid voxelize(GLBParser.MeshData mesh, int resolution, TextureSampler textureSampler) {
         LOGGER.info("Voxelizing mesh with resolution {}x{}x{}", resolution, resolution, resolution);
         
         float[] vertices = mesh.vertices();
         int[] indices = mesh.indices();
         int[] colors = mesh.colors();
+        float[] uvs = mesh.uvs();
+        
+        boolean hasUVs = uvs != null && uvs.length > 0;
+        boolean hasTexture = textureSampler != null && hasUVs;
+        
+        LOGGER.info("Voxelization mode: {} (hasUVs={}, hasTexture={})", 
+            hasTexture ? "PER-VOXEL TEXTURE SAMPLING" : "VERTEX COLOR INTERPOLATION",
+            hasUVs, textureSampler != null);
         
         if (vertices.length == 0) {
             LOGGER.warn("Empty mesh, returning empty voxel grid");
@@ -112,26 +148,40 @@ public class Voxelizer {
         
         LOGGER.info("Scale factor: {}", scale);
         
-        // Create voxel grid
+        // Create voxel grid and distance tracking for "closest triangle wins"
         Map<BlockPos, Integer> voxels = new HashMap<>();
+        Map<BlockPos, Float> voxelDistances = new HashMap<>(); // Track distance for each voxel
         
-        // Build list of triangles with color information
+        // Build list of triangles with UV coordinates
         List<Triangle> triangles = new ArrayList<>();
         for (int i = 0; i < indices.length; i += 3) {
             int idx0 = indices[i];
             int idx1 = indices[i + 1];
             int idx2 = indices[i + 2];
             
+            // Get UV coordinates for each vertex (if available)
+            float u0 = hasUVs ? uvs[idx0 * 2] : 0;
+            float v0 = hasUVs ? uvs[idx0 * 2 + 1] : 0;
+            float u1 = hasUVs ? uvs[idx1 * 2] : 0;
+            float v1 = hasUVs ? uvs[idx1 * 2 + 1] : 0;
+            float u2 = hasUVs ? uvs[idx2 * 2] : 0;
+            float v2 = hasUVs ? uvs[idx2 * 2 + 1] : 0;
+            
             triangles.add(new Triangle(
                 vertices[idx0 * 3], vertices[idx0 * 3 + 1], vertices[idx0 * 3 + 2],
                 vertices[idx1 * 3], vertices[idx1 * 3 + 1], vertices[idx1 * 3 + 2],
                 vertices[idx2 * 3], vertices[idx2 * 3 + 1], vertices[idx2 * 3 + 2],
-                0, 0, 0, 0, 0, 0, // UVs not used here
+                u0, v0, u1, v1, u2, v2,
                 colors[idx0], colors[idx1], colors[idx2]
             ));
         }
         
-        LOGGER.info("Voxelizing {} triangles using surface rasterization", triangles.size());
+        LOGGER.info("Voxelizing {} triangles using surface rasterization (closest-triangle-wins)", triangles.size());
+        
+        // Track texture sampling stats
+        int textureSamples = 0;
+        int colorInterpolations = 0;
+        int closerTriangleUpdates = 0;
         
         // Surface voxelization: rasterize each triangle's surface
         for (Triangle tri : triangles) {
@@ -173,10 +223,32 @@ public class Voxelizer {
                         float voxelSize = 1.0f / scale;
                         if (dist < voxelSize * 0.866f) { // sqrt(3)/2 ≈ 0.866 (half voxel diagonal)
                             BlockPos pos = new BlockPos(vx, vy, vz);
-                            if (!voxels.containsKey(pos)) {
-                                // Interpolate color using barycentric coordinates
-                                int color = tri.interpolateColor(bary[0], bary[1], bary[2]);
+                            
+                            // CLOSEST TRIANGLE WINS: Only update if this triangle is closer
+                            float currentDist = voxelDistances.getOrDefault(pos, Float.MAX_VALUE);
+                            if (dist < currentDist) {
+                                // Track if this is an update (closer triangle replaced existing)
+                                if (currentDist < Float.MAX_VALUE) {
+                                    closerTriangleUpdates++;
+                                }
+                                
+                                int color;
+                                
+                                // Sample texture at interpolated UV coordinates
+                                if (hasTexture && tri.hasValidUVs()) {
+                                    // Interpolate UV coordinates using barycentric coords
+                                    float[] uv = tri.interpolateUV(bary[0], bary[1], bary[2]);
+                                    // Sample texture at this specific UV position
+                                    color = textureSampler.sample(uv[0], uv[1]);
+                                    textureSamples++;
+                                } else {
+                                    // Fallback: interpolate vertex colors
+                                    color = tri.interpolateColor(bary[0], bary[1], bary[2]);
+                                    colorInterpolations++;
+                                }
+                                
                                 voxels.put(pos, color);
+                                voxelDistances.put(pos, dist);
                             }
                         }
                     }
@@ -184,7 +256,8 @@ public class Voxelizer {
             }
         }
         
-        LOGGER.info("Voxelized mesh: {} voxels", voxels.size());
+        LOGGER.info("Voxelized mesh: {} voxels (texture samples: {}, color interpolations: {}, closer-triangle updates: {})", 
+            voxels.size(), textureSamples, colorInterpolations, closerTriangleUpdates);
         
         return new VoxelGrid(voxels, resolution);
     }
@@ -260,4 +333,3 @@ public class Voxelizer {
     }
     
 }
-

@@ -262,6 +262,7 @@ public class FalAPI {
         JsonObject requestBody = new JsonObject();
         requestBody.addProperty("prompt", prompt);
         requestBody.addProperty("mode", "full"); // Use full mode (textured model with proper colors)
+        requestBody.addProperty("topology", "quad"); // Quad topology for cleaner UV layouts
         
         String requestBodyJson = GSON.toJson(requestBody);
         LOGGER.info("Submitting 3D generation request to fal queue...");

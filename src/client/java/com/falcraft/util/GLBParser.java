@@ -32,7 +32,7 @@ public class GLBParser {
      * Represents parsed mesh data from a GLB file
      * @param vertices Array of vertex positions (x,y,z,x,y,z,...)
      * @param indices Array of triangle indices
-     * @param colors Array of vertex colors (RGB as integers)
+     * @param colors Array of vertex colors (RGB as integers) - fallback when no texture
      * @param uvs Array of UV coordinates (u,v,u,v,...), null if no UVs
      */
     public record MeshData(float[] vertices, int[] indices, int[] colors, float[] uvs) {}
@@ -118,8 +118,10 @@ public class GLBParser {
     
     /**
      * Parses a GLB file and extracts mesh data
+     * Note: textureSampler parameter is kept for API compatibility but not used.
+     * Color sampling now happens in the Voxelizer for better accuracy.
      * @param glbData The GLB file as a byte array
-     * @param textureSampler Optional texture sampler for sampling colors from UV coords
+     * @param textureSampler Unused (kept for API compatibility)
      * @return Parsed mesh data
      * @throws IOException If the GLB format is invalid
      */
@@ -169,13 +171,14 @@ public class GLBParser {
         LOGGER.info("Extracted binary data ({} bytes)", binData.length);
         
         // Extract mesh data from glTF structure
-        return extractMeshData(gltf, binData, textureSampler);
+        return extractMeshData(gltf, binData);
     }
     
     /**
      * Extracts mesh data from glTF JSON structure and binary buffer
+     * UV coordinates are passed through for per-voxel sampling in the Voxelizer
      */
-    private static MeshData extractMeshData(JsonObject gltf, byte[] binData, TextureSampler textureSampler) throws IOException {
+    private static MeshData extractMeshData(JsonObject gltf, byte[] binData) throws IOException {
         LOGGER.info("Extracting mesh data from glTF structure");
         
         // Log texture/image information from GLB
@@ -204,7 +207,6 @@ public class GLBParser {
         List<Float> allUVs = new ArrayList<>();
         
         int vertexOffset = 0;
-        boolean hasTexture = (textureSampler != null);
         
         // Process each primitive (submesh)
         for (int i = 0; i < primitives.size(); i++) {
@@ -233,79 +235,48 @@ public class GLBParser {
                 }
             }
             
-            // Extract UV coordinates if available
+            // Extract UV coordinates (critical for per-voxel texture sampling!)
             float[] uvs = null;
             if (attributes.has("TEXCOORD_0")) {
                 int uvAccessorIndex = attributes.get("TEXCOORD_0").getAsInt();
                 uvs = extractFloatArray(gltf, binData, uvAccessorIndex);
                 LOGGER.info("Primitive {}: Found TEXCOORD_0 with {} UVs", i, uvs.length / 2);
-            }
-            
-            // Extract or generate colors
-            int[] colors;
-            if (hasTexture && uvs != null) {
-                // Sample colors from texture using UV coordinates
-                LOGGER.info("Primitive {}: Sampling colors from texture", i);
-                colors = new int[positions.length / 3];
                 
-                // Track color distribution for debugging
-                int whiteCount = 0, redCount = 0, blackCount = 0, otherCount = 0;
+                // Log UV coordinate range for debugging
                 float minU = Float.MAX_VALUE, maxU = Float.MIN_VALUE;
                 float minV = Float.MAX_VALUE, maxV = Float.MIN_VALUE;
-                
-                for (int j = 0; j < colors.length; j++) {
-                    float u = uvs[j * 2];
-                    float v = uvs[j * 2 + 1];
-                    colors[j] = textureSampler.sample(u, v);
-                    
-                    minU = Math.min(minU, u);
-                    maxU = Math.max(maxU, u);
-                    minV = Math.min(minV, v);
-                    maxV = Math.max(maxV, v);
-                    
-                    // Sample first few for debugging
-                    if (j < 5) {
-                        int r = (colors[j] >> 16) & 0xFF;
-                        int g = (colors[j] >> 8) & 0xFF;
-                        int b = colors[j] & 0xFF;
-                        LOGGER.info("  Sample {}: UV=({},{}) -> RGB=({},{},{})", j, u, v, r, g, b);
-                    }
-                    
-                    // Count color distribution
-                    int r = (colors[j] >> 16) & 0xFF;
-                    int g = (colors[j] >> 8) & 0xFF;
-                    int b = colors[j] & 0xFF;
-                    if (r > 200 && g > 200 && b > 200) whiteCount++;
-                    else if (r > 150 && r > g * 2 && r > b * 2) redCount++;
-                    else if (r < 50 && g < 50 && b < 50) blackCount++;
-                    else otherCount++;
+                for (int j = 0; j < uvs.length; j += 2) {
+                    minU = Math.min(minU, uvs[j]);
+                    maxU = Math.max(maxU, uvs[j]);
+                    minV = Math.min(minV, uvs[j + 1]);
+                    maxV = Math.max(maxV, uvs[j + 1]);
                 }
-                
-                LOGGER.info("Primitive {}: Color distribution - White: {}, Red: {}, Black: {}, Other: {}", 
-                    i, whiteCount, redCount, blackCount, otherCount);
-                LOGGER.info("Primitive {}: UV coordinate range - U: [{}, {}], V: [{}, {}]", 
-                    i, minU, maxU, minV, maxV);
-            } else if (attributes.has("COLOR_0")) {
+                LOGGER.info("Primitive {}: UV range - U: [{}, {}], V: [{}, {}]", i, minU, maxU, minV, maxV);
+            } else {
+                LOGGER.warn("Primitive {}: No TEXCOORD_0 found - texture sampling will not work!", i);
+            }
+            
+            // Generate fallback colors from vertex colors or position-based
+            // These are only used if texture sampling fails
+            int[] colors;
+            if (attributes.has("COLOR_0")) {
                 // Use vertex colors from GLB
                 int colorAccessorIndex = attributes.get("COLOR_0").getAsInt();
                 colors = extractColorArray(gltf, binData, colorAccessorIndex);
                 LOGGER.info("Primitive {}: Found COLOR_0 attribute with {} colors", i, colors.length);
             } else {
-                // No color data available - generate colors based on vertex position
-                LOGGER.info("Primitive {}: No color/texture data, generating colors from geometry", i);
+                // Generate fallback colors based on vertex position
+                LOGGER.info("Primitive {}: No COLOR_0, generating position-based fallback colors", i);
                 colors = new int[positions.length / 3];
                 for (int j = 0; j < colors.length; j++) {
-                    // Generate varied colors based on position to create visual variety
+                    // Generate varied colors based on position (normalized)
                     float x = positions[j * 3];
                     float y = positions[j * 3 + 1];
                     float z = positions[j * 3 + 2];
                     
-                    // Create color variation based on position (normalized)
-                    int r = (int) (Math.abs(x * 127) % 256);
-                    int g = (int) (Math.abs(y * 127) % 256);
-                    int b = (int) (Math.abs(z * 127) % 256);
-                    
-                    colors[j] = (r << 16) | (g << 8) | b;
+                    // Create neutral gray colors as fallback
+                    int gray = (int) ((Math.abs(x * 50) + Math.abs(y * 50) + Math.abs(z * 50)) % 128) + 64;
+                    colors[j] = (gray << 16) | (gray << 8) | gray;
                 }
             }
             
@@ -319,6 +290,12 @@ public class GLBParser {
             if (uvs != null) {
                 for (float uv : uvs) {
                     allUVs.add(uv);
+                }
+            } else {
+                // Add zero UVs as placeholder (will not be used for texture sampling)
+                for (int j = 0; j < positions.length / 3; j++) {
+                    allUVs.add(0.0f);
+                    allUVs.add(0.0f);
                 }
             }
             
@@ -334,16 +311,13 @@ public class GLBParser {
         int[] indices = allIndices.stream().mapToInt(Integer::intValue).toArray();
         int[] colors = allColors.stream().mapToInt(Integer::intValue).toArray();
         
-        float[] uvs = null;
-        if (!allUVs.isEmpty()) {
-            uvs = new float[allUVs.size()];
-            for (int i = 0; i < allUVs.size(); i++) {
-                uvs[i] = allUVs.get(i);
-            }
+        float[] uvs = new float[allUVs.size()];
+        for (int i = 0; i < allUVs.size(); i++) {
+            uvs[i] = allUVs.get(i);
         }
         
         LOGGER.info("Extracted mesh: {} vertices, {} indices, {} colors, {} UVs",
-                vertices.length / 3, indices.length, colors.length, uvs != null ? uvs.length / 2 : 0);
+                vertices.length / 3, indices.length, colors.length, uvs.length / 2);
         
         return new MeshData(vertices, indices, colors, uvs);
     }
@@ -446,4 +420,3 @@ public class GLBParser {
         };
     }
 }
-

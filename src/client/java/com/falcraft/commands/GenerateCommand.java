@@ -119,12 +119,14 @@ public class GenerateCommand {
                 LOGGER.info("Parsed GLB: {} vertices, {} indices", 
                         meshData.vertices().length / 3, meshData.indices().length);
                 
-                // Step 4: Voxelize the mesh
+                // Step 4: Voxelize the mesh with per-voxel texture sampling
+                final TextureSampler finalTextureSampler = textureSampler;
                 Minecraft.getInstance().execute(() ->
                     source.sendFeedback(Component.literal("§e[fal] Converting to voxels (" + 
                             size + "x" + size + "x" + size + ")...")));
                 
-                Voxelizer.VoxelGrid voxelGrid = Voxelizer.voxelize(meshData, size);
+                // Pass the texture sampler to enable per-voxel UV-based color sampling
+                Voxelizer.VoxelGrid voxelGrid = Voxelizer.voxelize(meshData, size, finalTextureSampler);
                 LOGGER.info("Voxelized mesh: {} voxels", voxelGrid.voxels().size());
                 
                 if (voxelGrid.voxels().isEmpty()) {
