@@ -10,20 +10,22 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Converts 3D mesh data to a voxel grid using the obj2voxel approach:
- * Triangle-voxel clipping with area-based "max wins" strategy.
+ * Converts 3D mesh data to a voxel grid using the obj2voxel algorithm.
  * 
- * This is the mathematically correct approach used by professional voxelizers.
+ * This implementation uses TRIANGLE SPLITTING instead of polygon clipping.
+ * For each voxel, we split the triangle against all 6 axis-aligned planes
+ * of the voxel cube, keeping only the portions that fall inside.
+ * 
  * Reference: https://github.com/eisenwave/obj2voxel
- * 
- * Algorithm:
- * 1. For each triangle, iterate over voxels in its bounding box
- * 2. Clip the triangle against the 6 faces of each voxel (Sutherland-Hodgman)
- * 3. Compute the area of the clipped polygon
- * 4. The triangle with the largest area inside a voxel determines its color
  */
 public class Voxelizer {
     private static final Logger LOGGER = LoggerFactory.getLogger("Voxelizer");
+    
+    // Epsilon for floating point comparisons
+    private static final double EPSILON = 1.0 / (1 << 16);
+    
+    // Distance limit for plane distance test optimization
+    private static final double DISTANCE_LIMIT = 2.0; // sqrt(3) ≈ 1.73 with some leeway
     
     /**
      * Represents a voxelized 3D model
@@ -31,7 +33,34 @@ public class Voxelizer {
     public record VoxelGrid(Map<BlockPos, Integer> voxels, int size) {}
     
     /**
-     * 3D Vector for geometry calculations
+     * 2D vector for UV coordinates
+     */
+    private static class Vec2 {
+        double u, v;
+        
+        Vec2(double u, double v) {
+            this.u = u;
+            this.v = v;
+        }
+        
+        static Vec2 mix(Vec2 a, Vec2 b, double t) {
+            return new Vec2(
+                a.u + (b.u - a.u) * t,
+                a.v + (b.v - a.v) * t
+            );
+        }
+        
+        static Vec2 add(Vec2 a, Vec2 b) {
+            return new Vec2(a.u + b.u, a.v + b.v);
+        }
+        
+        static Vec2 scale(Vec2 v, double s) {
+            return new Vec2(v.u * s, v.v * s);
+        }
+    }
+    
+    /**
+     * 3D vector
      */
     private static class Vec3 {
         double x, y, z;
@@ -42,8 +71,13 @@ public class Voxelizer {
             this.z = z;
         }
         
-        Vec3 copy() {
-            return new Vec3(x, y, z);
+        double get(int axis) {
+            return switch (axis) {
+                case 0 -> x;
+                case 1 -> y;
+                case 2 -> z;
+                default -> throw new IllegalArgumentException("Invalid axis: " + axis);
+            };
         }
         
         static Vec3 sub(Vec3 a, Vec3 b) {
@@ -54,8 +88,12 @@ public class Voxelizer {
             return new Vec3(a.x + b.x, a.y + b.y, a.z + b.z);
         }
         
-        static Vec3 scale(Vec3 v, double s) {
-            return new Vec3(v.x * s, v.y * s, v.z * s);
+        static Vec3 mix(Vec3 a, Vec3 b, double t) {
+            return new Vec3(
+                a.x + (b.x - a.x) * t,
+                a.y + (b.y - a.y) * t,
+                a.z + (b.z - a.z) * t
+            );
         }
         
         static Vec3 cross(Vec3 a, Vec3 b) {
@@ -74,254 +112,371 @@ public class Voxelizer {
             return Math.sqrt(x * x + y * y + z * z);
         }
         
-        /**
-         * Linear interpolation between two vectors
-         */
-        static Vec3 lerp(Vec3 a, Vec3 b, double t) {
-            return new Vec3(
-                a.x + (b.x - a.x) * t,
-                a.y + (b.y - a.y) * t,
-                a.z + (b.z - a.z) * t
+        Vec3 normalize() {
+            double len = length();
+            if (len > 0) {
+                return new Vec3(x / len, y / len, z / len);
+            }
+            return new Vec3(0, 0, 0);
+        }
+    }
+    
+    /**
+     * A textured triangle with vertices and UV coordinates
+     */
+    private static class TexturedTriangle {
+        Vec3[] v = new Vec3[3];  // Vertices
+        Vec2[] t = new Vec2[3];  // Texture coordinates
+        
+        TexturedTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Vec2 t0, Vec2 t1, Vec2 t2) {
+            v[0] = v0; v[1] = v1; v[2] = v2;
+            t[0] = t0; t[1] = t1; t[2] = t2;
+        }
+        
+        TexturedTriangle copy() {
+            return new TexturedTriangle(
+                new Vec3(v[0].x, v[0].y, v[0].z),
+                new Vec3(v[1].x, v[1].y, v[1].z),
+                new Vec3(v[2].x, v[2].y, v[2].z),
+                new Vec2(t[0].u, t[0].v),
+                new Vec2(t[1].u, t[1].v),
+                new Vec2(t[2].u, t[2].v)
+            );
+        }
+        
+        Vec3 vertex(int i) { return v[i]; }
+        Vec2 texture(int i) { return t[i]; }
+        
+        /** Returns the (unnormalized) normal */
+        Vec3 normal() {
+            return Vec3.cross(Vec3.sub(v[1], v[0]), Vec3.sub(v[2], v[0]));
+        }
+        
+        /** Returns the area of the triangle */
+        double area() {
+            return normal().length() / 2.0;
+        }
+        
+        /** Returns the center of the UV coordinates */
+        Vec2 textureCenter() {
+            return new Vec2(
+                (t[0].u + t[1].u + t[2].u) / 3.0,
+                (t[0].v + t[1].v + t[2].v) / 3.0
+            );
+        }
+        
+        /** Returns minimum on an axis */
+        double min(int axis) {
+            return Math.min(v[0].get(axis), Math.min(v[1].get(axis), v[2].get(axis)));
+        }
+        
+        /** Returns maximum on an axis */
+        double max(int axis) {
+            return Math.max(v[0].get(axis), Math.max(v[1].get(axis), v[2].get(axis)));
+        }
+        
+        /** Returns inclusive minimum voxel boundary */
+        int[] voxelMin() {
+            return new int[] {
+                (int) Math.floor(min(0)),
+                (int) Math.floor(min(1)),
+                (int) Math.floor(min(2))
+            };
+        }
+        
+        /** Returns exclusive maximum voxel boundary */
+        int[] voxelMax() {
+            return new int[] {
+                (int) Math.floor(max(0)) + 1,
+                (int) Math.floor(max(1)) + 1,
+                (int) Math.floor(max(2)) + 1
+            };
+        }
+    }
+    
+    /**
+     * Weighted UV for blending
+     */
+    private static class WeightedUv {
+        double weight;
+        Vec2 uv;
+        
+        WeightedUv(double weight, Vec2 uv) {
+            this.weight = weight;
+            this.uv = uv;
+        }
+        
+        static WeightedUv mix(WeightedUv a, WeightedUv b) {
+            double weightSum = a.weight + b.weight;
+            if (weightSum == 0) return new WeightedUv(0, new Vec2(0, 0));
+            return new WeightedUv(
+                weightSum,
+                new Vec2(
+                    (a.weight * a.uv.u + b.weight * b.uv.u) / weightSum,
+                    (a.weight * a.uv.v + b.weight * b.uv.v) / weightSum
+                )
             );
         }
     }
     
     /**
-     * A vertex with position and UV coordinates
+     * Weighted color for blending
      */
-    private static class Vertex {
-        Vec3 pos;
-        double u, v;
+    private static class WeightedColor {
+        double weight;
+        int color;
         
-        Vertex(Vec3 pos, double u, double v) {
-            this.pos = pos;
-            this.u = u;
-            this.v = v;
+        WeightedColor(double weight, int color) {
+            this.weight = weight;
+            this.color = color;
         }
         
-        Vertex copy() {
-            return new Vertex(pos.copy(), u, v);
-        }
-        
-        /**
-         * Linear interpolation between two vertices (position and UVs)
-         */
-        static Vertex lerp(Vertex a, Vertex b, double t) {
-            return new Vertex(
-                Vec3.lerp(a.pos, b.pos, t),
-                a.u + (b.u - a.u) * t,
-                a.v + (b.v - a.v) * t
-            );
+        /** MAX strategy: choose color with greater weight */
+        static WeightedColor max(WeightedColor a, WeightedColor b) {
+            return a.weight > b.weight ? a : b;
         }
     }
     
-    /**
-     * Represents a polygon (triangle or clipped result) with vertices and UVs
-     */
-    private static class Polygon {
-        List<Vertex> vertices;
-        
-        Polygon() {
-            this.vertices = new ArrayList<>();
-        }
-        
-        Polygon(Vertex v0, Vertex v1, Vertex v2) {
-            this.vertices = new ArrayList<>();
-            vertices.add(v0);
-            vertices.add(v1);
-            vertices.add(v2);
-        }
-        
-        void addVertex(Vertex v) {
-            vertices.add(v);
-        }
-        
-        int size() {
-            return vertices.size();
-        }
-        
-        boolean isEmpty() {
-            return vertices.size() < 3;
-        }
-        
-        /**
-         * Computes the area of this 3D polygon using the cross product method
-         */
-        double computeArea() {
-            if (vertices.size() < 3) return 0;
-            
-            // Use the Newell method for 3D polygon area
-            // Sum cross products of edges from first vertex
-            Vec3 sum = new Vec3(0, 0, 0);
-            Vertex v0 = vertices.get(0);
-            
-            for (int i = 1; i < vertices.size() - 1; i++) {
-                Vertex v1 = vertices.get(i);
-                Vertex v2 = vertices.get(i + 1);
-                
-                Vec3 e1 = Vec3.sub(v1.pos, v0.pos);
-                Vec3 e2 = Vec3.sub(v2.pos, v0.pos);
-                Vec3 cross = Vec3.cross(e1, e2);
-                
-                sum.x += cross.x;
-                sum.y += cross.y;
-                sum.z += cross.z;
-            }
-            
-            return sum.length() * 0.5;
-        }
-        
-        /**
-         * Computes the centroid UV coordinates of this polygon
-         */
-        double[] computeCentroidUV() {
-            if (vertices.isEmpty()) return new double[] {0, 0};
-            
-            double sumU = 0, sumV = 0;
-            for (Vertex v : vertices) {
-                sumU += v.u;
-                sumV += v.v;
-            }
-            return new double[] {sumU / vertices.size(), sumV / vertices.size()};
-        }
+    // ==================== TRIANGLE SPLITTING ====================
+    
+    private static boolean isZero(double x) {
+        return Math.abs(x) < EPSILON;
+    }
+    
+    private static boolean eq(double x, int plane) {
+        return isZero(x - plane);
     }
     
     /**
-     * Clips a polygon against a plane using Sutherland-Hodgman algorithm.
+     * Computes the intersection parameter t for a ray with an axis-aligned plane.
+     * Ray: org + t * dir
+     * Plane: x[axis] = plane
+     */
+    private static double intersectRayAxisPlane(Vec3 org, Vec3 dir, int axis, int plane) {
+        double d = -dir.get(axis);
+        return isZero(d) ? 0 : (org.get(axis) - plane) / d;
+    }
+    
+    /**
+     * Signed distance from point to plane
+     */
+    private static double distancePointPlane(Vec3 p, Vec3 planeOrg, Vec3 planeNormal) {
+        return Vec3.dot(planeNormal, Vec3.sub(p, planeOrg));
+    }
+    
+    /**
+     * Discard mode for triangle splitting
+     */
+    private enum DiscardMode {
+        NONE,       // Keep both sides
+        DISCARD_LO, // Discard triangles on the low side
+        DISCARD_HI  // Discard triangles on the high side
+    }
+    
+    /**
+     * Splits a triangle against an axis-aligned plane.
      * 
-     * @param polygon The polygon to clip
-     * @param planeNormal The plane normal (points to the "inside" half-space)
-     * @param planeD The plane distance (plane equation: dot(normal, point) + d = 0)
-     * @return The clipped polygon (may be empty if entirely outside)
+     * @param axis The axis (0=X, 1=Y, 2=Z)
+     * @param plane The plane position
+     * @param tri The triangle to split
+     * @param outLo Output for triangles on the low side (< plane)
+     * @param outHi Output for triangles on the high side (>= plane)
+     * @param mode Discard mode
      */
-    private static Polygon clipPolygonAgainstPlane(Polygon polygon, Vec3 planeNormal, double planeD) {
-        if (polygon.isEmpty()) return polygon;
+    private static void splitTriangle(int axis, int plane, TexturedTriangle tri,
+                                      List<TexturedTriangle> outLo, List<TexturedTriangle> outHi,
+                                      DiscardMode mode) {
+        // Classify vertices
+        boolean[] loVertices = new boolean[3];
+        boolean[] planarVertices = new boolean[3];
+        int loSum = 0, planarSum = 0;
         
-        Polygon result = new Polygon();
-        int n = polygon.size();
+        for (int i = 0; i < 3; i++) {
+            double val = tri.vertex(i).get(axis);
+            planarVertices[i] = eq(val, plane);
+            loVertices[i] = val < plane;
+            if (loVertices[i]) loSum++;
+            if (planarVertices[i]) planarSum++;
+        }
         
-        for (int i = 0; i < n; i++) {
-            Vertex current = polygon.vertices.get(i);
-            Vertex next = polygon.vertices.get((i + 1) % n);
+        // Helper to push to correct output based on mode
+        java.util.function.BiConsumer<TexturedTriangle, Boolean> push = (t, isLo) -> {
+            if (mode == DiscardMode.NONE) {
+                (isLo ? outLo : outHi).add(t);
+            } else if (mode == DiscardMode.DISCARD_LO) {
+                if (!isLo) outHi.add(t);
+            } else { // DISCARD_HI
+                if (isLo) outLo.add(t);
+            }
+        };
+        
+        // Case: All vertices on hi side
+        if (loSum == 0) {
+            push.accept(tri, false);
+            return;
+        }
+        
+        // Case: All vertices on lo side
+        if (loSum == 3) {
+            push.accept(tri, true);
+            return;
+        }
+        
+        // Case: All vertices are planar (on the plane)
+        if (planarSum == 3) {
+            push.accept(tri, false); // Bias to hi
+            return;
+        }
+        
+        // Case: Two vertices are planar
+        if (planarSum == 2) {
+            // Find the non-planar vertex
+            int nonPlanar = !planarVertices[0] ? 0 : !planarVertices[1] ? 1 : 2;
+            push.accept(tri, loVertices[nonPlanar]);
+            return;
+        }
+        
+        // Case: One vertex is planar
+        if (planarSum == 1) {
+            int planarIdx = planarVertices[0] ? 0 : planarVertices[1] ? 1 : 2;
+            int[] nonPlanarIdx = {(planarIdx + 1) % 3, (planarIdx + 2) % 3};
             
-            // Signed distance to plane (positive = inside, negative = outside)
-            double distCurrent = Vec3.dot(planeNormal, current.pos) + planeD;
-            double distNext = Vec3.dot(planeNormal, next.pos) + planeD;
-            
-            boolean currentInside = distCurrent >= 0;
-            boolean nextInside = distNext >= 0;
-            
-            if (currentInside) {
-                // Current vertex is inside, add it
-                result.addVertex(current.copy());
+            // Check if both non-planar vertices are on the same side
+            if (loVertices[nonPlanarIdx[0]] == loVertices[nonPlanarIdx[1]]) {
+                push.accept(tri, loVertices[nonPlanarIdx[0]]);
+                return;
             }
             
-            // Check if edge crosses the plane
-            if (currentInside != nextInside) {
-                // Compute intersection point
-                double t = distCurrent / (distCurrent - distNext);
-                t = Math.max(0, Math.min(1, t)); // Clamp for numerical stability
-                Vertex intersection = Vertex.lerp(current, next, t);
-                result.addVertex(intersection);
+            // Split: one vertex on plane, other two on opposite sides
+            Vec3 planarVert = tri.vertex(planarIdx);
+            Vec2 planarTex = tri.texture(planarIdx);
+            Vec3[] nonPlanarVerts = {tri.vertex(nonPlanarIdx[0]), tri.vertex(nonPlanarIdx[1])};
+            Vec2[] nonPlanarTexs = {tri.texture(nonPlanarIdx[0]), tri.texture(nonPlanarIdx[1])};
+            Vec3 edge = Vec3.sub(nonPlanarVerts[1], nonPlanarVerts[0]);
+            
+            double t = intersectRayAxisPlane(nonPlanarVerts[0], edge, axis, plane);
+            Vec3 geoIsect = Vec3.mix(nonPlanarVerts[0], nonPlanarVerts[1], t);
+            Vec2 texIsect = Vec2.mix(nonPlanarTexs[0], nonPlanarTexs[1], t);
+            
+            TexturedTriangle tri1 = new TexturedTriangle(planarVert, nonPlanarVerts[0], geoIsect,
+                                                          planarTex, nonPlanarTexs[0], texIsect);
+            TexturedTriangle tri2 = new TexturedTriangle(planarVert, geoIsect, nonPlanarVerts[1],
+                                                          planarTex, texIsect, nonPlanarTexs[1]);
+            
+            push.accept(tri1, loVertices[nonPlanarIdx[0]]);
+            push.accept(tri2, !loVertices[nonPlanarIdx[0]]);
+            return;
+        }
+        
+        // Regular case: Triangle crosses the plane, no vertices on it
+        // One vertex is isolated on one side, two on the other
+        boolean isolatedIsLo = loSum == 1;
+        int isolatedIdx = isolatedIsLo ? 
+            (loVertices[0] ? 0 : loVertices[1] ? 1 : 2) :
+            (!loVertices[0] ? 0 : !loVertices[1] ? 1 : 2);
+        int[] otherIdx = {(isolatedIdx + 1) % 3, (isolatedIdx + 2) % 3};
+        
+        Vec3 isolatedVert = tri.vertex(isolatedIdx);
+        Vec2 isolatedTex = tri.texture(isolatedIdx);
+        Vec3[] otherVerts = {tri.vertex(otherIdx[0]), tri.vertex(otherIdx[1])};
+        Vec2[] otherTexs = {tri.texture(otherIdx[0]), tri.texture(otherIdx[1])};
+        
+        Vec3[] edges = {Vec3.sub(otherVerts[0], isolatedVert), Vec3.sub(otherVerts[1], isolatedVert)};
+        double[] ts = {
+            intersectRayAxisPlane(isolatedVert, edges[0], axis, plane),
+            intersectRayAxisPlane(isolatedVert, edges[1], axis, plane)
+        };
+        Vec3[] geoIsects = {
+            Vec3.mix(isolatedVert, otherVerts[0], ts[0]),
+            Vec3.mix(isolatedVert, otherVerts[1], ts[1])
+        };
+        Vec2[] texIsects = {
+            Vec2.mix(isolatedTex, otherTexs[0], ts[0]),
+            Vec2.mix(isolatedTex, otherTexs[1], ts[1])
+        };
+        
+        // Isolated triangle
+        TexturedTriangle isolatedTri = new TexturedTriangle(
+            isolatedVert, geoIsects[0], geoIsects[1],
+            isolatedTex, texIsects[0], texIsects[1]
+        );
+        
+        // Quad on the other side -> split into two triangles
+        TexturedTriangle otherTri1 = new TexturedTriangle(
+            geoIsects[0], otherVerts[0], otherVerts[1],
+            texIsects[0], otherTexs[0], otherTexs[1]
+        );
+        TexturedTriangle otherTri2 = new TexturedTriangle(
+            geoIsects[0], geoIsects[1], otherVerts[1],
+            texIsects[0], texIsects[1], otherTexs[1]
+        );
+        
+        push.accept(isolatedTri, isolatedIsLo);
+        push.accept(otherTri1, !isolatedIsLo);
+        push.accept(otherTri2, !isolatedIsLo);
+    }
+    
+    /**
+     * Computes the weighted UV for triangles inside a voxel.
+     * Splits the triangle against all 6 voxel faces and returns the blended UV.
+     */
+    private static WeightedUv computeTriangleUvInVoxel(TexturedTriangle inputTriangle, int vx, int vy, int vz) {
+        List<TexturedTriangle> preSplit = new ArrayList<>();
+        List<TexturedTriangle> postSplit = new ArrayList<>();
+        
+        preSplit.add(inputTriangle.copy());
+        
+        // Split against all 6 faces of the voxel
+        // hi=0: low planes (keep >= plane, discard < plane) -> DISCARD_LO
+        // hi=1: high planes (keep < plane, discard >= plane) -> DISCARD_HI
+        int[] pos = {vx, vy, vz};
+        
+        for (int hi = 0; hi < 2; hi++) {
+            DiscardMode mode = hi == 0 ? DiscardMode.DISCARD_LO : DiscardMode.DISCARD_HI;
+            
+            for (int axis = 0; axis < 3; axis++) {
+                int plane = pos[axis] + hi;
+                
+                for (TexturedTriangle t : preSplit) {
+                    splitTriangle(axis, plane, t, postSplit, postSplit, mode);
+                }
+                
+                preSplit.clear();
+                if (postSplit.isEmpty()) {
+                    return new WeightedUv(0, new Vec2(0, 0));
+                }
+                
+                // Swap buffers
+                List<TexturedTriangle> tmp = preSplit;
+                preSplit = postSplit;
+                postSplit = tmp;
             }
+        }
+        
+        // preSplit now contains triangles inside the voxel
+        // Blend their texture centers
+        WeightedUv result = new WeightedUv(0, new Vec2(0, 0));
+        for (TexturedTriangle t : preSplit) {
+            double weight = inputTriangle.area(); // Use original triangle's area as weight
+            Vec2 uv = t.textureCenter();
+            result = WeightedUv.mix(result, new WeightedUv(weight, uv));
         }
         
         return result;
     }
     
-    /**
-     * Clips a polygon against a voxel's 6 faces.
-     * Returns the portion of the polygon that lies inside the voxel.
-     * 
-     * @param polygon The polygon to clip
-     * @param voxelMin Minimum corner of the voxel (x, y, z)
-     * @param voxelMax Maximum corner of the voxel (x+1, y+1, z+1)
-     * @return The clipped polygon (empty if triangle doesn't intersect voxel)
-     */
-    private static Polygon clipPolygonAgainstVoxel(Polygon polygon, Vec3 voxelMin, Vec3 voxelMax) {
-        // Clip against all 6 faces of the voxel
-        // Each face is defined by a normal pointing inward and a distance
-        
-        // -X face (normal = +X, keeps points where x >= voxelMin.x)
-        polygon = clipPolygonAgainstPlane(polygon, new Vec3(1, 0, 0), -voxelMin.x);
-        if (polygon.isEmpty()) return polygon;
-        
-        // +X face (normal = -X, keeps points where x <= voxelMax.x)
-        polygon = clipPolygonAgainstPlane(polygon, new Vec3(-1, 0, 0), voxelMax.x);
-        if (polygon.isEmpty()) return polygon;
-        
-        // -Y face (normal = +Y, keeps points where y >= voxelMin.y)
-        polygon = clipPolygonAgainstPlane(polygon, new Vec3(0, 1, 0), -voxelMin.y);
-        if (polygon.isEmpty()) return polygon;
-        
-        // +Y face (normal = -Y, keeps points where y <= voxelMax.y)
-        polygon = clipPolygonAgainstPlane(polygon, new Vec3(0, -1, 0), voxelMax.y);
-        if (polygon.isEmpty()) return polygon;
-        
-        // -Z face (normal = +Z, keeps points where z >= voxelMin.z)
-        polygon = clipPolygonAgainstPlane(polygon, new Vec3(0, 0, 1), -voxelMin.z);
-        if (polygon.isEmpty()) return polygon;
-        
-        // +Z face (normal = -Z, keeps points where z <= voxelMax.z)
-        polygon = clipPolygonAgainstPlane(polygon, new Vec3(0, 0, -1), voxelMax.z);
-        
-        return polygon;
-    }
+    // ==================== MAIN VOXELIZATION ====================
     
-    /**
-     * Stores the best (largest area) triangle contribution for each voxel
-     */
-    private static class VoxelCandidate {
-        double area;
-        int color;
-        
-        VoxelCandidate(double area, int color) {
-            this.area = area;
-            this.color = color;
-        }
-    }
-    
-    /**
-     * Triangle data with UV coordinates
-     */
-    private static class Triangle {
-        Vertex v0, v1, v2;
-        int color0, color1, color2; // Fallback vertex colors
-        
-        Triangle(Vertex v0, Vertex v1, Vertex v2, int color0, int color1, int color2) {
-            this.v0 = v0;
-            this.v1 = v1;
-            this.v2 = v2;
-            this.color0 = color0;
-            this.color1 = color1;
-            this.color2 = color2;
-        }
-        
-        Polygon toPolygon() {
-            return new Polygon(v0.copy(), v1.copy(), v2.copy());
-        }
-        
-        boolean hasValidUVs() {
-            return (v0.u != 0 || v0.v != 0 || v1.u != 0 || v1.v != 0 || v2.u != 0 || v2.v != 0);
-        }
-    }
-    
-    // Legacy method for compatibility
     public static VoxelGrid voxelize(GLBParser.MeshData mesh, int resolution) {
         return voxelize(mesh, resolution, null);
     }
     
-    /**
-     * Voxelizes a mesh using triangle-voxel clipping with "max area wins" strategy.
-     * This is the obj2voxel approach - mathematically correct voxelization.
-     */
     public static VoxelGrid voxelize(GLBParser.MeshData mesh, int resolution, TextureSampler textureSampler) {
-        LOGGER.info("Voxelizing mesh with resolution {}x{}x{} using AREA-BASED clipping (obj2voxel approach)", 
+        LOGGER.info("Voxelizing mesh with resolution {}x{}x{} using OBJ2VOXEL triangle splitting", 
             resolution, resolution, resolution);
         
         float[] vertices = mesh.vertices();
         int[] indices = mesh.indices();
-        int[] colors = mesh.colors();
         float[] uvs = mesh.uvs();
         
         boolean hasUVs = uvs != null && uvs.length > 0;
@@ -356,121 +511,114 @@ public class Voxelizer {
             return new VoxelGrid(new HashMap<>(), resolution);
         }
         
-        // Scale to fit in resolution grid with 1 voxel padding
-        double scale = (resolution - 2) / maxSize;
-        double offsetX = -minX * scale + 1;
-        double offsetY = -minY * scale + 1;
-        double offsetZ = -minZ * scale + 1;
+        // Anti-bleed: slight padding (from obj2voxel)
+        double antiBleed = 0.5;
+        double sampleScale = resolution - antiBleed;
+        
+        // Scale and offset to fit in resolution grid
+        double scale = sampleScale / maxSize;
+        double offsetX = -minX * scale + antiBleed / 2;
+        double offsetY = -minY * scale + antiBleed / 2;
+        double offsetZ = -minZ * scale + antiBleed / 2;
         
         LOGGER.info("Bounds: ({},{},{}) to ({},{},{}), scale: {}", 
             minX, minY, minZ, maxX, maxY, maxZ, scale);
         
-        // Build triangles list
-        List<Triangle> triangles = new ArrayList<>();
+        // Build triangles
+        List<TexturedTriangle> triangles = new ArrayList<>();
         for (int i = 0; i < indices.length; i += 3) {
             int idx0 = indices[i];
             int idx1 = indices[i + 1];
             int idx2 = indices[i + 2];
             
             // Transform vertices to voxel grid space
-            Vec3 p0 = new Vec3(
+            Vec3 v0 = new Vec3(
                 vertices[idx0 * 3] * scale + offsetX,
                 vertices[idx0 * 3 + 1] * scale + offsetY,
                 vertices[idx0 * 3 + 2] * scale + offsetZ
             );
-            Vec3 p1 = new Vec3(
+            Vec3 v1 = new Vec3(
                 vertices[idx1 * 3] * scale + offsetX,
                 vertices[idx1 * 3 + 1] * scale + offsetY,
                 vertices[idx1 * 3 + 2] * scale + offsetZ
             );
-            Vec3 p2 = new Vec3(
+            Vec3 v2 = new Vec3(
                 vertices[idx2 * 3] * scale + offsetX,
                 vertices[idx2 * 3 + 1] * scale + offsetY,
                 vertices[idx2 * 3 + 2] * scale + offsetZ
             );
             
             // Get UVs
-            double u0 = hasUVs ? uvs[idx0 * 2] : 0;
-            double v0 = hasUVs ? uvs[idx0 * 2 + 1] : 0;
-            double u1 = hasUVs ? uvs[idx1 * 2] : 0;
-            double v1 = hasUVs ? uvs[idx1 * 2 + 1] : 0;
-            double u2 = hasUVs ? uvs[idx2 * 2] : 0;
-            double v2 = hasUVs ? uvs[idx2 * 2 + 1] : 0;
+            Vec2 t0 = hasUVs ? new Vec2(uvs[idx0 * 2], uvs[idx0 * 2 + 1]) : new Vec2(0, 0);
+            Vec2 t1 = hasUVs ? new Vec2(uvs[idx1 * 2], uvs[idx1 * 2 + 1]) : new Vec2(0, 0);
+            Vec2 t2 = hasUVs ? new Vec2(uvs[idx2 * 2], uvs[idx2 * 2 + 1]) : new Vec2(0, 0);
             
-            Vertex vert0 = new Vertex(p0, u0, v0);
-            Vertex vert1 = new Vertex(p1, u1, v1);
-            Vertex vert2 = new Vertex(p2, u2, v2);
-            
-            triangles.add(new Triangle(vert0, vert1, vert2, colors[idx0], colors[idx1], colors[idx2]));
+            triangles.add(new TexturedTriangle(v0, v1, v2, t0, t1, t2));
         }
         
-        LOGGER.info("Processing {} triangles with area-based clipping...", triangles.size());
+        LOGGER.info("Processing {} triangles with triangle splitting...", triangles.size());
         
-        // Track best candidate for each voxel (MAX AREA WINS)
-        Map<BlockPos, VoxelCandidate> candidates = new HashMap<>();
-        
-        // Stats
+        // Voxelize each triangle
+        Map<BlockPos, WeightedColor> candidates = new HashMap<>();
         int trianglesProcessed = 0;
         int voxelsUpdated = 0;
-        int clipsPerformed = 0;
         
-        // Process each triangle
-        for (Triangle tri : triangles) {
+        for (TexturedTriangle tri : triangles) {
             trianglesProcessed++;
             
-            // Get bounding box in voxel coordinates
-            int minVX = (int) Math.floor(Math.min(tri.v0.pos.x, Math.min(tri.v1.pos.x, tri.v2.pos.x)));
-            int minVY = (int) Math.floor(Math.min(tri.v0.pos.y, Math.min(tri.v1.pos.y, tri.v2.pos.y)));
-            int minVZ = (int) Math.floor(Math.min(tri.v0.pos.z, Math.min(tri.v1.pos.z, tri.v2.pos.z)));
-            int maxVX = (int) Math.ceil(Math.max(tri.v0.pos.x, Math.max(tri.v1.pos.x, tri.v2.pos.x)));
-            int maxVY = (int) Math.ceil(Math.max(tri.v0.pos.y, Math.max(tri.v1.pos.y, tri.v2.pos.y)));
-            int maxVZ = (int) Math.ceil(Math.max(tri.v0.pos.z, Math.max(tri.v1.pos.z, tri.v2.pos.z)));
+            // Get voxel bounds
+            int[] vMin = tri.voxelMin();
+            int[] vMax = tri.voxelMax();
             
             // Clamp to grid
-            minVX = Math.max(0, minVX);
-            minVY = Math.max(0, minVY);
-            minVZ = Math.max(0, minVZ);
-            maxVX = Math.min(resolution - 1, maxVX);
-            maxVY = Math.min(resolution - 1, maxVY);
-            maxVZ = Math.min(resolution - 1, maxVZ);
+            vMin[0] = Math.max(0, vMin[0]);
+            vMin[1] = Math.max(0, vMin[1]);
+            vMin[2] = Math.max(0, vMin[2]);
+            vMax[0] = Math.min(resolution, vMax[0]);
+            vMax[1] = Math.min(resolution, vMax[1]);
+            vMax[2] = Math.min(resolution, vMax[2]);
+            
+            // Precompute plane info for distance test
+            Vec3 planeOrg = tri.vertex(0);
+            Vec3 planeNormal = tri.normal().normalize();
+            boolean validNormal = !Double.isNaN(planeNormal.x);
             
             // Process each voxel in the bounding box
-            for (int vx = minVX; vx <= maxVX; vx++) {
-                for (int vy = minVY; vy <= maxVY; vy++) {
-                    for (int vz = minVZ; vz <= maxVZ; vz++) {
-                        // Clip triangle against this voxel
-                        Polygon clipped = clipPolygonAgainstVoxel(
-                            tri.toPolygon(),
-                            new Vec3(vx, vy, vz),
-                            new Vec3(vx + 1, vy + 1, vz + 1)
-                        );
-                        clipsPerformed++;
-                        
-                        if (clipped.isEmpty()) continue;
-                        
-                        // Compute area of clipped polygon
-                        double area = clipped.computeArea();
-                        if (area < 1e-10) continue;
-                        
-                        // Sample color at centroid of clipped polygon
-                        int color;
-                        if (hasTexture && tri.hasValidUVs()) {
-                            double[] centroidUV = clipped.computeCentroidUV();
-                            color = textureSampler.sample((float) centroidUV[0], (float) centroidUV[1]);
-                        } else {
-                            // Fallback: average vertex colors
-                            int r = ((tri.color0 >> 16) & 0xFF + (tri.color1 >> 16) & 0xFF + (tri.color2 >> 16) & 0xFF) / 3;
-                            int g = ((tri.color0 >> 8) & 0xFF + (tri.color1 >> 8) & 0xFF + (tri.color2 >> 8) & 0xFF) / 3;
-                            int b = ((tri.color0) & 0xFF + (tri.color1) & 0xFF + (tri.color2) & 0xFF) / 3;
-                            color = (r << 16) | (g << 8) | b;
+            for (int vz = vMin[2]; vz < vMax[2]; vz++) {
+                for (int vy = vMin[1]; vy < vMax[1]; vy++) {
+                    for (int vx = vMin[0]; vx < vMax[0]; vx++) {
+                        // Distance test optimization
+                        if (validNormal) {
+                            Vec3 center = new Vec3(vx + 0.5, vy + 0.5, vz + 0.5);
+                            double dist = Math.abs(distancePointPlane(center, planeOrg, planeNormal));
+                            if (dist > DISTANCE_LIMIT) {
+                                continue;
+                            }
                         }
                         
-                        // MAX AREA WINS: Only update if this triangle has larger area in this voxel
-                        BlockPos pos = new BlockPos(vx, vy, vz);
-                        VoxelCandidate existing = candidates.get(pos);
+                        // Split triangle against voxel and get weighted UV
+                        WeightedUv weightedUv = computeTriangleUvInVoxel(tri, vx, vy, vz);
                         
-                        if (existing == null || area > existing.area) {
-                            candidates.put(pos, new VoxelCandidate(area, color));
+                        if (weightedUv.weight <= 0) {
+                            continue;
+                        }
+                        
+                        // Sample color at the UV
+                        int color;
+                        if (hasTexture) {
+                            color = textureSampler.sample((float) weightedUv.uv.u, (float) weightedUv.uv.v);
+                        } else {
+                            // Default gray
+                            color = 0x808080;
+                        }
+                        
+                        // MAX strategy: triangle with larger weight wins
+                        BlockPos pos = new BlockPos(vx, vy, vz);
+                        WeightedColor newColor = new WeightedColor(weightedUv.weight, color);
+                        WeightedColor existing = candidates.get(pos);
+                        
+                        if (existing == null || newColor.weight > existing.weight) {
+                            candidates.put(pos, newColor);
                             voxelsUpdated++;
                         }
                     }
@@ -479,18 +627,19 @@ public class Voxelizer {
             
             // Progress logging
             if (trianglesProcessed % 10000 == 0) {
-                LOGGER.info("Progress: {}/{} triangles, {} voxels", trianglesProcessed, triangles.size(), candidates.size());
+                LOGGER.info("Progress: {}/{} triangles, {} voxels", 
+                    trianglesProcessed, triangles.size(), candidates.size());
             }
         }
         
-        // Convert candidates to final voxel map
+        // Extract final colors
         Map<BlockPos, Integer> voxels = new HashMap<>();
-        for (Map.Entry<BlockPos, VoxelCandidate> entry : candidates.entrySet()) {
+        for (Map.Entry<BlockPos, WeightedColor> entry : candidates.entrySet()) {
             voxels.put(entry.getKey(), entry.getValue().color);
         }
         
         LOGGER.info("Voxelization complete: {} voxels from {} triangles", voxels.size(), triangles.size());
-        LOGGER.info("Stats: {} clips performed, {} voxel updates", clipsPerformed, voxelsUpdated);
+        LOGGER.info("Stats: {} voxel updates", voxelsUpdated);
         
         return new VoxelGrid(voxels, resolution);
     }
