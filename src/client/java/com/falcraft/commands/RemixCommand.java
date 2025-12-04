@@ -1,6 +1,8 @@
 package com.falcraft.commands;
 
 import com.falcraft.util.ClientTextureGrabber;
+import com.falcraft.util.ClientTextureGrabber.MultiGrabResult;
+import com.falcraft.util.ClientTextureGrabber.TextureEntry;
 import com.falcraft.util.FalAPI;
 import com.falcraft.util.PackIO;
 import com.mojang.brigadier.CommandDispatcher;
@@ -12,13 +14,29 @@ import net.minecraft.network.chat.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.argument;
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.literal;
 
 public class RemixCommand {
     private static final Logger LOGGER = LoggerFactory.getLogger("RemixCommand");
+
+    /**
+     * Holds the result of a single texture remix operation
+     */
+    private static class RemixResult {
+        final String textureName;
+        final byte[] pngBytes;
+        
+        RemixResult(String textureName, byte[] pngBytes) {
+            this.textureName = textureName;
+            this.pngBytes = pngBytes;
+        }
+    }
 
     public static void register(CommandDispatcher<FabricClientCommandSource> dispatcher) {
         dispatcher.register(literal("fal")
@@ -39,10 +57,11 @@ public class RemixCommand {
             try {
                 LOGGER.info("Starting remix process...");
                 
-                // Step 1: Grab the texture of the block being looked at
+                // Step 1: Grab ALL textures from the block being looked at
                 Minecraft.getInstance().execute(() -> 
-                    source.sendFeedback(Component.literal("§e[fal] Extracting current texture...")));
-                ClientTextureGrabber.GrabResult grabResult = ClientTextureGrabber.grabTargetedBlockTexture();
+                    source.sendFeedback(Component.literal("§e[fal] Extracting block textures...")));
+                
+                MultiGrabResult grabResult = ClientTextureGrabber.grabAllBlockTextures();
                 
                 if (grabResult == null) {
                     Minecraft.getInstance().execute(() ->
@@ -50,44 +69,98 @@ public class RemixCommand {
                     return;
                 }
                 
-                File textureFile = grabResult.textureFile;
-                String blockId = grabResult.blockId;
+                int textureCount = grabResult.textures.size();
+                LOGGER.info("Found {} unique textures for block: {}", textureCount, grabResult.blockId);
                 
-                LOGGER.info("Grabbed texture for block: {}", blockId);
-                Minecraft.getInstance().execute(() ->
-                    source.sendFeedback(Component.literal("§e[fal] Extracted texture for: " + blockId)));
+                // Build list of texture names for display
+                StringBuilder textureList = new StringBuilder();
+                for (int i = 0; i < grabResult.textures.size(); i++) {
+                    if (i > 0) textureList.append(", ");
+                    textureList.append(grabResult.textures.get(i).textureName);
+                }
                 
-                // Step 2: Call fal API to remix the texture
+                final String textureNames = textureList.toString();
                 Minecraft.getInstance().execute(() ->
-                    source.sendFeedback(Component.literal("§e[fal] Sending to fal for remixing...")));
+                    source.sendFeedback(Component.literal("§e[fal] Found " + textureCount + " texture(s): " + textureNames)));
+                
+                // Step 2: Send parallel API requests for each unique texture
+                Minecraft.getInstance().execute(() ->
+                    source.sendFeedback(Component.literal("§e[fal] Sending " + textureCount + " texture(s) to fal for remixing...")));
+                
                 FalAPI falApi = new FalAPI();
-                byte[] remixedTexture = falApi.remixTexture(textureFile, prompt);
+                List<CompletableFuture<RemixResult>> futures = new ArrayList<>();
+                AtomicInteger completedCount = new AtomicInteger(0);
                 
-                LOGGER.info("Received remixed texture from fal API");
+                for (TextureEntry texture : grabResult.textures) {
+                    CompletableFuture<RemixResult> future = CompletableFuture.supplyAsync(() -> {
+                        try {
+                            LOGGER.info("Remixing texture: {}", texture.textureName);
+                            byte[] remixed = falApi.remixTexture(texture.textureFile, prompt);
+                            
+                            int done = completedCount.incrementAndGet();
+                            Minecraft.getInstance().execute(() ->
+                                source.sendFeedback(Component.literal("§e[fal] ✓ Remixed " + texture.textureName + " (" + done + "/" + textureCount + ")")));
+                            
+                            return new RemixResult(texture.textureName, remixed);
+                        } catch (Exception e) {
+                            LOGGER.error("Failed to remix texture: {}", texture.textureName, e);
+                            throw new RuntimeException("Failed to remix " + texture.textureName + ": " + e.getMessage(), e);
+                        }
+                    });
+                    futures.add(future);
+                }
+                
+                // Wait for all API calls to complete
+                LOGGER.info("Waiting for {} API calls to complete...", futures.size());
+                CompletableFuture<Void> allFutures = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+                
+                try {
+                    allFutures.join();
+                } catch (Exception e) {
+                    // One or more futures failed
+                    Minecraft.getInstance().execute(() ->
+                        source.sendError(Component.literal("§c[fal] Error: Some textures failed to remix. Check logs.")));
+                    grabResult.cleanup();
+                    return;
+                }
+                
+                // Clean up the temporary texture files
+                grabResult.cleanup();
+                
+                // Step 3: Write all remixed textures to the resource pack
                 Minecraft.getInstance().execute(() ->
-                    source.sendFeedback(Component.literal("§e[fal] Received remixed texture!")));
+                    source.sendFeedback(Component.literal("§e[fal] Writing " + textureCount + " texture(s) to resource pack...")));
                 
-                // Clean up the temporary texture file
-                textureFile.delete();
-                textureFile.getParentFile().delete();
-                
-                // Step 3: Write the remixed texture to the resource pack
-                Minecraft.getInstance().execute(() ->
-                    source.sendFeedback(Component.literal("§e[fal] Writing texture to resource pack...")));
                 PackIO packIO = new PackIO();
-                packIO.writeTexture(blockId, remixedTexture);
+                int writtenCount = 0;
                 
-                LOGGER.info("Wrote remixed texture to resource pack");
+                for (CompletableFuture<RemixResult> future : futures) {
+                    try {
+                        RemixResult result = future.get();
+                        packIO.writeTexture(result.textureName, result.pngBytes);
+                        writtenCount++;
+                        LOGGER.info("Wrote remixed texture: {}", result.textureName);
+                    } catch (Exception e) {
+                        LOGGER.error("Failed to write texture", e);
+                    }
+                }
                 
-                // Step 4: Reload resource packs to apply the change
+                if (writtenCount == 0) {
+                    Minecraft.getInstance().execute(() ->
+                        source.sendError(Component.literal("§c[fal] Error: No textures were written!")));
+                    return;
+                }
+                
+                // Step 4: Single reload to apply all textures at once
                 Minecraft.getInstance().execute(() ->
                     source.sendFeedback(Component.literal("§e[fal] Reloading resource packs...")));
                 packIO.reloadResourcePacks();
                 
                 // Success message
+                final int finalWrittenCount = writtenCount;
                 Minecraft.getInstance().execute(() ->
-                    source.sendFeedback(Component.literal("§a[fal] ✓ Texture remix complete! The new texture has been applied.")));
-                LOGGER.info("Remix process completed successfully");
+                    source.sendFeedback(Component.literal("§a[fal] ✓ Texture remix complete! Applied " + finalWrittenCount + " new texture(s).")));
+                LOGGER.info("Remix process completed successfully - {} textures applied", writtenCount);
                 
             } catch (IllegalStateException e) {
                 // Handle missing API key
@@ -105,4 +178,3 @@ public class RemixCommand {
         return 1;
     }
 }
-
