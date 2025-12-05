@@ -122,15 +122,23 @@ public class Voxelizer {
     }
     
     /**
-     * A textured triangle with vertices and UV coordinates
+     * A textured triangle with vertices, UV coordinates, and vertex colors
      */
     private static class TexturedTriangle {
         Vec3[] v = new Vec3[3];  // Vertices
         Vec2[] t = new Vec2[3];  // Texture coordinates
+        int[] c = new int[3];    // Vertex colors (RGB packed)
         
         TexturedTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Vec2 t0, Vec2 t1, Vec2 t2) {
             v[0] = v0; v[1] = v1; v[2] = v2;
             t[0] = t0; t[1] = t1; t[2] = t2;
+            c[0] = 0x808080; c[1] = 0x808080; c[2] = 0x808080; // Default gray
+        }
+        
+        TexturedTriangle(Vec3 v0, Vec3 v1, Vec3 v2, Vec2 t0, Vec2 t1, Vec2 t2, int c0, int c1, int c2) {
+            v[0] = v0; v[1] = v1; v[2] = v2;
+            t[0] = t0; t[1] = t1; t[2] = t2;
+            c[0] = c0; c[1] = c1; c[2] = c2;
         }
         
         TexturedTriangle copy() {
@@ -140,12 +148,14 @@ public class Voxelizer {
                 new Vec3(v[2].x, v[2].y, v[2].z),
                 new Vec2(t[0].u, t[0].v),
                 new Vec2(t[1].u, t[1].v),
-                new Vec2(t[2].u, t[2].v)
+                new Vec2(t[2].u, t[2].v),
+                c[0], c[1], c[2]
             );
         }
         
         Vec3 vertex(int i) { return v[i]; }
         Vec2 texture(int i) { return t[i]; }
+        int color(int i) { return c[i]; }
         
         /** Returns the (unnormalized) normal */
         Vec3 normal() {
@@ -163,6 +173,27 @@ public class Voxelizer {
                 (t[0].u + t[1].u + t[2].u) / 3.0,
                 (t[0].v + t[1].v + t[2].v) / 3.0
             );
+        }
+        
+        /** Returns the interpolated color at the triangle center (average of vertex colors) */
+        int colorCenter() {
+            int r0 = (c[0] >> 16) & 0xFF, g0 = (c[0] >> 8) & 0xFF, b0 = c[0] & 0xFF;
+            int r1 = (c[1] >> 16) & 0xFF, g1 = (c[1] >> 8) & 0xFF, b1 = c[1] & 0xFF;
+            int r2 = (c[2] >> 16) & 0xFF, g2 = (c[2] >> 8) & 0xFF, b2 = c[2] & 0xFF;
+            int r = (r0 + r1 + r2) / 3;
+            int g = (g0 + g1 + g2) / 3;
+            int b = (b0 + b1 + b2) / 3;
+            return (r << 16) | (g << 8) | b;
+        }
+        
+        /** Interpolates between two colors by factor t (0.0 = c1, 1.0 = c2) */
+        static int mixColor(int c1, int c2, double t) {
+            int r1 = (c1 >> 16) & 0xFF, g1 = (c1 >> 8) & 0xFF, b1 = c1 & 0xFF;
+            int r2 = (c2 >> 16) & 0xFF, g2 = (c2 >> 8) & 0xFF, b2 = c2 & 0xFF;
+            int r = (int) (r1 + (r2 - r1) * t);
+            int g = (int) (g1 + (g2 - g1) * t);
+            int b = (int) (b1 + (b2 - b1) * t);
+            return (r << 16) | (g << 8) | b;
         }
         
         /** Returns minimum on an axis */
@@ -350,18 +381,23 @@ public class Voxelizer {
             // Split: one vertex on plane, other two on opposite sides
             Vec3 planarVert = tri.vertex(planarIdx);
             Vec2 planarTex = tri.texture(planarIdx);
+            int planarCol = tri.color(planarIdx);
             Vec3[] nonPlanarVerts = {tri.vertex(nonPlanarIdx[0]), tri.vertex(nonPlanarIdx[1])};
             Vec2[] nonPlanarTexs = {tri.texture(nonPlanarIdx[0]), tri.texture(nonPlanarIdx[1])};
+            int[] nonPlanarCols = {tri.color(nonPlanarIdx[0]), tri.color(nonPlanarIdx[1])};
             Vec3 edge = Vec3.sub(nonPlanarVerts[1], nonPlanarVerts[0]);
             
             double t = intersectRayAxisPlane(nonPlanarVerts[0], edge, axis, plane);
             Vec3 geoIsect = Vec3.mix(nonPlanarVerts[0], nonPlanarVerts[1], t);
             Vec2 texIsect = Vec2.mix(nonPlanarTexs[0], nonPlanarTexs[1], t);
+            int colIsect = TexturedTriangle.mixColor(nonPlanarCols[0], nonPlanarCols[1], t);
             
             TexturedTriangle tri1 = new TexturedTriangle(planarVert, nonPlanarVerts[0], geoIsect,
-                                                          planarTex, nonPlanarTexs[0], texIsect);
+                                                          planarTex, nonPlanarTexs[0], texIsect,
+                                                          planarCol, nonPlanarCols[0], colIsect);
             TexturedTriangle tri2 = new TexturedTriangle(planarVert, geoIsect, nonPlanarVerts[1],
-                                                          planarTex, texIsect, nonPlanarTexs[1]);
+                                                          planarTex, texIsect, nonPlanarTexs[1],
+                                                          planarCol, colIsect, nonPlanarCols[1]);
             
             push.accept(tri1, loVertices[nonPlanarIdx[0]]);
             push.accept(tri2, !loVertices[nonPlanarIdx[0]]);
@@ -378,8 +414,10 @@ public class Voxelizer {
         
         Vec3 isolatedVert = tri.vertex(isolatedIdx);
         Vec2 isolatedTex = tri.texture(isolatedIdx);
+        int isolatedCol = tri.color(isolatedIdx);
         Vec3[] otherVerts = {tri.vertex(otherIdx[0]), tri.vertex(otherIdx[1])};
         Vec2[] otherTexs = {tri.texture(otherIdx[0]), tri.texture(otherIdx[1])};
+        int[] otherCols = {tri.color(otherIdx[0]), tri.color(otherIdx[1])};
         
         Vec3[] edges = {Vec3.sub(otherVerts[0], isolatedVert), Vec3.sub(otherVerts[1], isolatedVert)};
         double[] ts = {
@@ -394,21 +432,28 @@ public class Voxelizer {
             Vec2.mix(isolatedTex, otherTexs[0], ts[0]),
             Vec2.mix(isolatedTex, otherTexs[1], ts[1])
         };
+        int[] colIsects = {
+            TexturedTriangle.mixColor(isolatedCol, otherCols[0], ts[0]),
+            TexturedTriangle.mixColor(isolatedCol, otherCols[1], ts[1])
+        };
         
         // Isolated triangle
         TexturedTriangle isolatedTri = new TexturedTriangle(
             isolatedVert, geoIsects[0], geoIsects[1],
-            isolatedTex, texIsects[0], texIsects[1]
+            isolatedTex, texIsects[0], texIsects[1],
+            isolatedCol, colIsects[0], colIsects[1]
         );
         
         // Quad on the other side -> split into two triangles
         TexturedTriangle otherTri1 = new TexturedTriangle(
             geoIsects[0], otherVerts[0], otherVerts[1],
-            texIsects[0], otherTexs[0], otherTexs[1]
+            texIsects[0], otherTexs[0], otherTexs[1],
+            colIsects[0], otherCols[0], otherCols[1]
         );
         TexturedTriangle otherTri2 = new TexturedTriangle(
             geoIsects[0], geoIsects[1], otherVerts[1],
-            texIsects[0], texIsects[1], otherTexs[1]
+            texIsects[0], texIsects[1], otherTexs[1],
+            colIsects[0], colIsects[1], otherCols[1]
         );
         
         push.accept(isolatedTri, isolatedIsLo);
@@ -481,9 +526,11 @@ public class Voxelizer {
         
         boolean hasUVs = uvs != null && uvs.length > 0;
         boolean hasTexture = textureSampler != null && hasUVs;
+        int[] colors = mesh.colors();
+        boolean hasColors = colors != null && colors.length > 0;
         
-        LOGGER.info("Mode: {} (hasUVs={}, hasTexture={})", 
-            hasTexture ? "TEXTURE SAMPLING" : "VERTEX COLORS", hasUVs, hasTexture);
+        LOGGER.info("Mode: {} (hasUVs={}, hasTexture={}, hasVertexColors={})", 
+            hasTexture ? "TEXTURE SAMPLING" : "VERTEX COLORS", hasUVs, hasTexture, hasColors);
         
         if (vertices.length == 0) {
             return new VoxelGrid(new HashMap<>(), resolution);
@@ -553,7 +600,12 @@ public class Voxelizer {
             Vec2 t1 = hasUVs ? new Vec2(uvs[idx1 * 2], uvs[idx1 * 2 + 1]) : new Vec2(0, 0);
             Vec2 t2 = hasUVs ? new Vec2(uvs[idx2 * 2], uvs[idx2 * 2 + 1]) : new Vec2(0, 0);
             
-            triangles.add(new TexturedTriangle(v0, v1, v2, t0, t1, t2));
+            // Get vertex colors
+            int c0 = hasColors ? colors[idx0] : 0x808080;
+            int c1 = hasColors ? colors[idx1] : 0x808080;
+            int c2 = hasColors ? colors[idx2] : 0x808080;
+            
+            triangles.add(new TexturedTriangle(v0, v1, v2, t0, t1, t2, c0, c1, c2));
         }
         
         LOGGER.info("Processing {} triangles with triangle splitting...", triangles.size());
@@ -603,13 +655,14 @@ public class Voxelizer {
                             continue;
                         }
                         
-                        // Sample color at the UV
+                        // Sample color at the UV or use vertex colors
                         int color;
                         if (hasTexture) {
+                            // Meshy-6 path: sample from texture using UV
                             color = textureSampler.sample((float) weightedUv.uv.u, (float) weightedUv.uv.v);
                         } else {
-                            // Default gray
-                            color = 0x808080;
+                            // SAM-3 path: use interpolated vertex colors
+                            color = tri.colorCenter();
                         }
                         
                         // MAX strategy: triangle with larger weight wins

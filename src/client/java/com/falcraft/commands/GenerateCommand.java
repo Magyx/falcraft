@@ -25,7 +25,8 @@ import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.lit
 
 /**
  * Command to generate 3D models from text prompts using fal AI
- * Usage: /fal generate <size> <prompt>
+ * Usage: /fal generate <size> <prompt>         - Meshy-6 (~7 minutes, highest quality)
+ *        /fal generate fast <size> <prompt>    - Z-Image + SAM-3 (~30 seconds, fast)
  * Size: 16-128 (recommended: 32=fast, 48=balanced, 64=detailed)
  */
 public class GenerateCommand {
@@ -34,6 +35,12 @@ public class GenerateCommand {
     public static void register(CommandDispatcher<FabricClientCommandSource> dispatcher) {
         dispatcher.register(literal("fal")
                 .then(literal("generate")
+                        // Fast mode: /fal generate fast <size> <prompt>
+                        .then(literal("fast")
+                                .then(argument("size", IntegerArgumentType.integer(16, 128))
+                                        .then(argument("prompt", StringArgumentType.greedyString())
+                                                .executes(GenerateCommand::executeFast))))
+                        // Standard mode: /fal generate <size> <prompt>
                         .then(argument("size", IntegerArgumentType.integer(16, 128))
                                 .then(argument("prompt", StringArgumentType.greedyString())
                                         .executes(GenerateCommand::execute)))));
@@ -165,6 +172,120 @@ public class GenerateCommand {
                 LOGGER.error("Error during 3D generation process", e);
             }
         }, "fal-Generate-Thread").start();
+        
+        return 1;
+    }
+    
+    /**
+     * Fast generation mode using Z-Image Turbo + SAM-3 pipeline
+     * Much faster than Meshy-6 (~30 seconds vs ~7 minutes)
+     */
+    private static int executeFast(CommandContext<FabricClientCommandSource> context) {
+        int size = IntegerArgumentType.getInteger(context, "size");
+        String prompt = StringArgumentType.getString(context, "prompt");
+        FabricClientCommandSource source = context.getSource();
+        
+        // Send initial feedback
+        source.sendFeedback(Component.literal("§e[fal] Starting §bFAST§e 3D generation (" + size + "x" + size + "x" + size + ")"));
+        source.sendFeedback(Component.literal("§e[fal] Prompt: \"" + prompt + "\""));
+        source.sendFeedback(Component.literal("§e[fal] Using Z-Image + SAM-3 pipeline (~30 seconds)"));
+        
+        // Run the generation process asynchronously
+        new Thread(() -> {
+            try {
+                LOGGER.info("Starting FAST 3D model generation process...");
+                
+                // Step 1: Generate image and convert to 3D using fast pipeline
+                Minecraft.getInstance().execute(() -> 
+                    source.sendFeedback(Component.literal("§e[fal] §b[1/4]§e Generating 2D image with Z-Image Turbo...")));
+                
+                FalAPI falApi = new FalAPI();
+                
+                // This chains Z-Image (text→image) + SAM-3 (image→3D)
+                // The generateModelFast method handles both steps internally
+                FalAPI.ModelResult modelResult = falApi.generateModelFast(prompt);
+                
+                LOGGER.info("Received GLB model from fast pipeline ({} bytes)", modelResult.glbData().length);
+                Minecraft.getInstance().execute(() ->
+                    source.sendFeedback(Component.literal("§e[fal] §b[2/4]§e 3D model generated! Processing...")));
+                
+                // Step 2: Extract embedded texture from GLB
+                TextureSampler textureSampler = null;
+                try {
+                    byte[] embeddedTexture = GLBParser.extractEmbeddedTexture(modelResult.glbData());
+                    if (embeddedTexture != null) {
+                        textureSampler = new TextureSampler(embeddedTexture);
+                        LOGGER.info("Loaded embedded texture from GLB: {} bytes", embeddedTexture.length);
+                        
+                        // DEBUG: Save texture for inspection
+                        try {
+                            Path debugPath = Paths.get("debug_texture_fast.png");
+                            Files.write(debugPath, embeddedTexture);
+                            LOGGER.info("DEBUG: Saved fast pipeline texture to: {}", debugPath.toAbsolutePath());
+                        } catch (Exception ex) {
+                            LOGGER.warn("Could not save debug texture: {}", ex.getMessage());
+                        }
+                    } else {
+                        LOGGER.warn("No embedded texture found in GLB from fast pipeline");
+                        Minecraft.getInstance().execute(() ->
+                            source.sendFeedback(Component.literal("§6[fal] No embedded texture, will use vertex colors")));
+                    }
+                } catch (Exception e) {
+                    LOGGER.error("Failed to extract embedded texture: {}", e.getMessage(), e);
+                }
+                
+                // Step 3: Parse GLB file
+                Minecraft.getInstance().execute(() ->
+                    source.sendFeedback(Component.literal("§e[fal] §b[3/4]§e Parsing 3D model...")));
+                
+                GLBParser.MeshData meshData = GLBParser.parse(modelResult.glbData(), textureSampler);
+                LOGGER.info("Parsed GLB: {} vertices, {} indices", 
+                        meshData.vertices().length / 3, meshData.indices().length);
+                
+                // Step 4: Voxelize the mesh
+                final TextureSampler finalTextureSampler = textureSampler;
+                Minecraft.getInstance().execute(() ->
+                    source.sendFeedback(Component.literal("§e[fal] §b[4/4]§e Converting to voxels (" + 
+                            size + "x" + size + "x" + size + ")...")));
+                
+                Voxelizer.VoxelGrid voxelGrid = Voxelizer.voxelize(meshData, size, finalTextureSampler);
+                LOGGER.info("Voxelized mesh: {} voxels", voxelGrid.voxels().size());
+                
+                if (voxelGrid.voxels().isEmpty()) {
+                    Minecraft.getInstance().execute(() ->
+                        source.sendError(Component.literal("§c[fal] Error: Generated model has no voxels!")));
+                    return;
+                }
+                
+                // Step 5: Enter placement preview mode
+                Minecraft.getInstance().execute(() -> {
+                    try {
+                        PlacementPreview.startPlacement(voxelGrid);
+                        
+                        source.sendFeedback(Component.literal(
+                                "§a[fal] ✓ §bFAST§a generation complete! " + voxelGrid.voxels().size() + " blocks ready."));
+                        source.sendFeedback(Component.literal(
+                                "§e[fal] Right-click to place, R to rotate!"));
+                        LOGGER.info("FAST 3D generation completed, entering placement preview mode");
+                        
+                    } catch (Exception e) {
+                        String errorMsg = e.getMessage();
+                        source.sendError(Component.literal("§c[fal] Error preparing placement: " + errorMsg));
+                        LOGGER.error("Error preparing placement", e);
+                    }
+                });
+                
+            } catch (IllegalStateException e) {
+                Minecraft.getInstance().execute(() ->
+                    source.sendError(Component.literal("§c[fal] Error: FAL_API_KEY not found in .env file!")));
+                LOGGER.error("FAL_API_KEY not set", e);
+            } catch (Exception e) {
+                String errorMsg = e.getMessage();
+                Minecraft.getInstance().execute(() ->
+                    source.sendError(Component.literal("§c[fal] Error during fast generation: " + errorMsg)));
+                LOGGER.error("Error during FAST 3D generation process", e);
+            }
+        }, "fal-FastGenerate-Thread").start();
         
         return 1;
     }

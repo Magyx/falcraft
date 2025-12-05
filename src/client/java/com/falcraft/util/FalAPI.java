@@ -21,6 +21,8 @@ public class FalAPI {
     private static final Logger LOGGER = LoggerFactory.getLogger("FalAPI");
     private static final String FAL_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/nano-banana/edit";
     private static final String FAL_3D_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/meshy/v6-preview/text-to-3d";
+    private static final String FAL_ZIMAGE_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/z-image/turbo";
+    private static final String FAL_SAM3_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/sam-3/3d-objects";
     private static final Gson GSON = new Gson();
     private final HttpClient httpClient;
     private final String apiKey;
@@ -412,6 +414,247 @@ public class FalAPI {
         
         LOGGER.info("Downloaded file: {} bytes", response.body().length);
         return response.body();
+    }
+
+    // ==================== FAST MODE: Z-Image + SAM-3 Pipeline ====================
+
+    /**
+     * Generates an image from a text prompt using Z-Image Turbo
+     * Optimized for 3D conversion with white background and diagonal view
+     * @param prompt The base prompt (will be augmented for 3D-friendly output)
+     * @return The URL of the generated image
+     * @throws IOException If network operations fail
+     * @throws InterruptedException If the thread is interrupted during polling
+     */
+    public String generateImageWithZImage(String prompt) throws IOException, InterruptedException {
+        // Augment prompt for 3D-friendly image generation
+        String augmentedPrompt = prompt + " image with plain white background, view from diagonally above";
+        LOGGER.info("Starting Z-Image generation with prompt: {}", augmentedPrompt);
+        
+        // Build request body
+        JsonObject requestBody = new JsonObject();
+        requestBody.addProperty("prompt", augmentedPrompt);
+        requestBody.addProperty("image_size", "square_hd");
+        requestBody.addProperty("num_inference_steps", 8);
+        requestBody.addProperty("num_images", 1);
+        requestBody.addProperty("enable_safety_checker", true);
+        requestBody.addProperty("output_format", "png");
+        
+        String requestBodyJson = GSON.toJson(requestBody);
+        LOGGER.info("Submitting Z-Image request to fal queue...");
+        
+        HttpRequest submitRequest = HttpRequest.newBuilder()
+                .uri(URI.create(FAL_ZIMAGE_QUEUE_SUBMIT))
+                .header("Authorization", "Key " + apiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
+                .build();
+        
+        HttpResponse<String> submitResponse = httpClient.send(submitRequest, HttpResponse.BodyHandlers.ofString());
+        
+        if (submitResponse.statusCode() != 200) {
+            LOGGER.error("Z-Image queue submit error: {} - {}", submitResponse.statusCode(), submitResponse.body());
+            throw new IOException("Failed to submit Z-Image request to fal queue: " + submitResponse.statusCode());
+        }
+        
+        JsonObject submitJson = GSON.fromJson(submitResponse.body(), JsonObject.class);
+        String requestId = submitJson.get("request_id").getAsString();
+        String responseUrl = submitJson.get("response_url").getAsString();
+        String statusUrl = submitJson.get("status_url").getAsString();
+        
+        LOGGER.info("Z-Image request submitted with ID: {}", requestId);
+        
+        // Poll for completion (Z-Image is fast, ~1 second)
+        boolean completed = false;
+        int attempts = 0;
+        int maxAttempts = 30; // 30 attempts * 1 second = 30 seconds max
+        
+        while (!completed && attempts < maxAttempts) {
+            Thread.sleep(1000); // Poll every 1 second (Z-Image is fast)
+            attempts++;
+            
+            HttpRequest statusRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(statusUrl))
+                    .header("Authorization", "Key " + apiKey)
+                    .GET()
+                    .build();
+            
+            HttpResponse<String> statusResponse = httpClient.send(statusRequest, HttpResponse.BodyHandlers.ofString());
+            
+            if (statusResponse.statusCode() == 200 || statusResponse.statusCode() == 202) {
+                JsonObject statusJson = GSON.fromJson(statusResponse.body(), JsonObject.class);
+                String status = statusJson.get("status").getAsString();
+                
+                LOGGER.info("Z-Image status check {}/{}: {}", attempts, maxAttempts, status);
+                
+                if ("COMPLETED".equals(status)) {
+                    completed = true;
+                } else if ("FAILED".equals(status)) {
+                    throw new IOException("Z-Image generation failed");
+                }
+            }
+        }
+        
+        if (!completed) {
+            throw new IOException("Z-Image generation timed out after " + maxAttempts + " attempts");
+        }
+        
+        // Get the result
+        LOGGER.info("Fetching Z-Image result...");
+        
+        HttpRequest resultRequest = HttpRequest.newBuilder()
+                .uri(URI.create(responseUrl))
+                .header("Authorization", "Key " + apiKey)
+                .GET()
+                .build();
+        
+        HttpResponse<String> resultResponse = httpClient.send(resultRequest, HttpResponse.BodyHandlers.ofString());
+        
+        if (resultResponse.statusCode() != 200) {
+            LOGGER.error("Failed to get Z-Image result: {} - {}", resultResponse.statusCode(), resultResponse.body());
+            throw new IOException("Failed to get Z-Image result from fal");
+        }
+        
+        JsonObject resultJson = GSON.fromJson(resultResponse.body(), JsonObject.class);
+        String imageUrl = resultJson.getAsJsonArray("images")
+                .get(0).getAsJsonObject()
+                .get("url").getAsString();
+        
+        LOGGER.info("Z-Image generated successfully: {}", imageUrl);
+        return imageUrl;
+    }
+
+    /**
+     * Converts an image to a 3D model using SAM-3
+     * @param imageUrl The URL of the source image
+     * @param prompt A short description of the object (helps SAM-3 understand the subject)
+     * @return ModelResult containing the GLB data
+     * @throws IOException If network operations fail
+     * @throws InterruptedException If the thread is interrupted during polling
+     */
+    public ModelResult generate3DWithSam3(String imageUrl, String prompt) throws IOException, InterruptedException {
+        LOGGER.info("Starting SAM-3 image-to-3D conversion...");
+        LOGGER.info("Source image: {}", imageUrl);
+        LOGGER.info("Object prompt: {}", prompt);
+        
+        // Build request body
+        JsonObject requestBody = new JsonObject();
+        requestBody.addProperty("image_url", imageUrl);
+        requestBody.addProperty("prompt", prompt);
+        requestBody.add("point_prompts", new JsonArray());
+        requestBody.add("box_prompts", new JsonArray());
+        
+        String requestBodyJson = GSON.toJson(requestBody);
+        LOGGER.info("Submitting SAM-3 request to fal queue...");
+        
+        HttpRequest submitRequest = HttpRequest.newBuilder()
+                .uri(URI.create(FAL_SAM3_QUEUE_SUBMIT))
+                .header("Authorization", "Key " + apiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
+                .build();
+        
+        HttpResponse<String> submitResponse = httpClient.send(submitRequest, HttpResponse.BodyHandlers.ofString());
+        
+        if (submitResponse.statusCode() != 200) {
+            LOGGER.error("SAM-3 queue submit error: {} - {}", submitResponse.statusCode(), submitResponse.body());
+            throw new IOException("Failed to submit SAM-3 request to fal queue: " + submitResponse.statusCode());
+        }
+        
+        JsonObject submitJson = GSON.fromJson(submitResponse.body(), JsonObject.class);
+        String requestId = submitJson.get("request_id").getAsString();
+        String responseUrl = submitJson.get("response_url").getAsString();
+        String statusUrl = submitJson.get("status_url").getAsString();
+        
+        LOGGER.info("SAM-3 request submitted with ID: {}", requestId);
+        
+        // Poll for completion (SAM-3 takes ~30-60 seconds)
+        boolean completed = false;
+        int attempts = 0;
+        int maxAttempts = 60; // 60 attempts * 2 seconds = 2 minutes max
+        
+        while (!completed && attempts < maxAttempts) {
+            Thread.sleep(2000); // Poll every 2 seconds
+            attempts++;
+            
+            HttpRequest statusRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(statusUrl))
+                    .header("Authorization", "Key " + apiKey)
+                    .GET()
+                    .build();
+            
+            HttpResponse<String> statusResponse = httpClient.send(statusRequest, HttpResponse.BodyHandlers.ofString());
+            
+            if (statusResponse.statusCode() == 200 || statusResponse.statusCode() == 202) {
+                JsonObject statusJson = GSON.fromJson(statusResponse.body(), JsonObject.class);
+                String status = statusJson.get("status").getAsString();
+                
+                LOGGER.info("SAM-3 status check {}/{}: {}", attempts, maxAttempts, status);
+                
+                if ("COMPLETED".equals(status)) {
+                    completed = true;
+                } else if ("FAILED".equals(status)) {
+                    throw new IOException("SAM-3 3D generation failed");
+                }
+            }
+        }
+        
+        if (!completed) {
+            throw new IOException("SAM-3 3D generation timed out after " + maxAttempts + " attempts");
+        }
+        
+        // Get the result
+        LOGGER.info("Fetching SAM-3 result...");
+        
+        HttpRequest resultRequest = HttpRequest.newBuilder()
+                .uri(URI.create(responseUrl))
+                .header("Authorization", "Key " + apiKey)
+                .GET()
+                .build();
+        
+        HttpResponse<String> resultResponse = httpClient.send(resultRequest, HttpResponse.BodyHandlers.ofString());
+        
+        if (resultResponse.statusCode() != 200) {
+            LOGGER.error("Failed to get SAM-3 result: {} - {}", resultResponse.statusCode(), resultResponse.body());
+            throw new IOException("Failed to get SAM-3 result from fal");
+        }
+        
+        JsonObject resultJson = GSON.fromJson(resultResponse.body(), JsonObject.class);
+        String glbUrl = resultJson.getAsJsonObject("model_glb")
+                .get("url").getAsString();
+        
+        LOGGER.info("SAM-3 GLB URL: {}", glbUrl);
+        LOGGER.info("Downloading GLB model...");
+        
+        // Download the GLB file
+        byte[] glbData = downloadFile(glbUrl);
+        
+        // SAM-3 embeds textures in the GLB, no separate texture URL
+        return new ModelResult(glbData, null);
+    }
+
+    /**
+     * Fast 3D model generation using Z-Image Turbo + SAM-3 pipeline
+     * Much faster than Meshy-6 (~30 seconds vs ~7 minutes)
+     * @param prompt The text prompt describing the desired 3D model
+     * @return ModelResult containing GLB data
+     * @throws IOException If network operations fail
+     * @throws InterruptedException If the thread is interrupted during polling
+     */
+    public ModelResult generateModelFast(String prompt) throws IOException, InterruptedException {
+        LOGGER.info("=== Starting FAST 3D generation (Z-Image + SAM-3) ===");
+        LOGGER.info("Prompt: {}", prompt);
+        
+        // Step 1: Generate 2D image with Z-Image Turbo
+        LOGGER.info("Step 1/2: Generating 2D image with Z-Image Turbo...");
+        String imageUrl = generateImageWithZImage(prompt);
+        
+        // Step 2: Convert image to 3D with SAM-3
+        LOGGER.info("Step 2/2: Converting to 3D with SAM-3...");
+        ModelResult result = generate3DWithSam3(imageUrl, prompt);
+        
+        LOGGER.info("=== FAST 3D generation complete! ===");
+        return result;
     }
 }
 

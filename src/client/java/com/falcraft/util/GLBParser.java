@@ -388,18 +388,88 @@ public class GLBParser {
     }
     
     /**
-     * Extracts color data and converts to RGB integers
+     * Extracts color data and converts to RGB integers.
+     * Handles different glTF color formats:
+     * - FLOAT (5126): 4 bytes per component
+     * - UNSIGNED_BYTE (5121): 1 byte per component, normalized 0-255 → 0.0-1.0
+     * - UNSIGNED_SHORT (5123): 2 bytes per component, normalized
+     * And both VEC3 (RGB) and VEC4 (RGBA) types.
      */
     private static int[] extractColorArray(JsonObject gltf, byte[] binData, int accessorIndex) throws IOException {
-        float[] colorFloats = extractFloatArray(gltf, binData, accessorIndex);
-        int[] colors = new int[colorFloats.length / 3]; // Assuming RGB (3 components)
+        JsonObject accessor = gltf.getAsJsonArray("accessors").get(accessorIndex).getAsJsonObject();
+        int bufferViewIndex = accessor.get("bufferView").getAsInt();
+        int count = accessor.get("count").getAsInt();
+        int componentType = accessor.get("componentType").getAsInt();
+        String type = accessor.get("type").getAsString();
         
-        for (int i = 0; i < colors.length; i++) {
-            int r = (int) (colorFloats[i * 3] * 255) & 0xFF;
-            int g = (int) (colorFloats[i * 3 + 1] * 255) & 0xFF;
-            int b = (int) (colorFloats[i * 3 + 2] * 255) & 0xFF;
-            colors[i] = (r << 16) | (g << 8) | b;
+        int byteOffset = accessor.has("byteOffset") ? accessor.get("byteOffset").getAsInt() : 0;
+        
+        JsonObject bufferView = gltf.getAsJsonArray("bufferViews").get(bufferViewIndex).getAsJsonObject();
+        int bufferViewOffset = bufferView.has("byteOffset") ? bufferView.get("byteOffset").getAsInt() : 0;
+        
+        int componentsPerVertex = getComponentCount(type); // 3 for VEC3, 4 for VEC4
+        int totalOffset = bufferViewOffset + byteOffset;
+        
+        LOGGER.info("Extracting COLOR_0: count={}, componentType={}, type={} ({}), offset={}", 
+            count, componentType, type, componentsPerVertex, totalOffset);
+        
+        ByteBuffer buffer = ByteBuffer.wrap(binData);
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+        buffer.position(totalOffset);
+        
+        int[] colors = new int[count];
+        
+        for (int i = 0; i < count; i++) {
+            float r, g, b;
+            
+            if (componentType == 5126) { // FLOAT
+                r = buffer.getFloat();
+                g = buffer.getFloat();
+                b = buffer.getFloat();
+                if (componentsPerVertex == 4) buffer.getFloat(); // skip alpha
+            } else if (componentType == 5121) { // UNSIGNED_BYTE (normalized)
+                r = (buffer.get() & 0xFF) / 255.0f;
+                g = (buffer.get() & 0xFF) / 255.0f;
+                b = (buffer.get() & 0xFF) / 255.0f;
+                if (componentsPerVertex == 4) buffer.get(); // skip alpha
+            } else if (componentType == 5123) { // UNSIGNED_SHORT (normalized)
+                r = (buffer.getShort() & 0xFFFF) / 65535.0f;
+                g = (buffer.getShort() & 0xFFFF) / 65535.0f;
+                b = (buffer.getShort() & 0xFFFF) / 65535.0f;
+                if (componentsPerVertex == 4) buffer.getShort(); // skip alpha
+            } else {
+                throw new IOException("Unsupported color component type: " + componentType);
+            }
+            
+            int ri = Math.min(255, Math.max(0, (int) (r * 255)));
+            int gi = Math.min(255, Math.max(0, (int) (g * 255)));
+            int bi = Math.min(255, Math.max(0, (int) (b * 255)));
+            colors[i] = (ri << 16) | (gi << 8) | bi;
+            
+            // Debug: log first few colors to see what we're getting
+            if (i < 10 || (i % 50000 == 0)) {
+                LOGGER.info("  Color[{}]: RGB({}, {}, {}) = 0x{}", i, ri, gi, bi, Integer.toHexString(colors[i]));
+            }
         }
+        
+        // Analyze color distribution
+        int minR = 255, maxR = 0, minG = 255, maxG = 0, minB = 255, maxB = 0;
+        int grayCount = 0;
+        for (int color : colors) {
+            int cr = (color >> 16) & 0xFF;
+            int cg = (color >> 8) & 0xFF;
+            int cb = color & 0xFF;
+            minR = Math.min(minR, cr); maxR = Math.max(maxR, cr);
+            minG = Math.min(minG, cg); maxG = Math.max(maxG, cg);
+            minB = Math.min(minB, cb); maxB = Math.max(maxB, cb);
+            // Count "gray-ish" colors where R≈G≈B
+            if (Math.abs(cr - cg) < 10 && Math.abs(cg - cb) < 10 && Math.abs(cr - cb) < 10) {
+                grayCount++;
+            }
+        }
+        LOGGER.info("Extracted {} vertex colors", colors.length);
+        LOGGER.info("Color range: R=[{}-{}], G=[{}-{}], B=[{}-{}]", minR, maxR, minG, maxG, minB, maxB);
+        LOGGER.info("Gray-ish colors: {}/{} ({:.1f}%)", grayCount, colors.length, (100.0 * grayCount / colors.length));
         
         return colors;
     }
