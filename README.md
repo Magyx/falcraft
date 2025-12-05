@@ -47,10 +47,15 @@ Point at any block and run:
 
 1. Install [Fabric Loader](https://fabricmc.net/use/) + [Fabric API](https://modrinth.com/mod/fabric-api) for MC 1.21.1
 2. Get API key from [fal.ai](https://fal.ai)
-3. Create `.env` in your `.minecraft/` folder:
-   ```
-   FAL_API_KEY=your_key_here
-   ```
+3. Create `.env` in your Minecraft game directory with your API key:
+
+```
+FAL_API_KEY=your_key_here
+```
+
+   - **Users**: `.minecraft/.env`
+   - **Developers**: `run/.env` (when using `./gradlew runClient`)
+
 4. Drop the mod JAR in `.minecraft/mods/`
 
 ## 🧠 How It Works
