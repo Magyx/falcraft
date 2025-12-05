@@ -150,7 +150,7 @@ public class GenerateCommand {
                         source.sendFeedback(Component.literal(
                                 "§a[fal] ✓ 3D model generated successfully! " + voxelGrid.voxels().size() + " blocks ready."));
                         source.sendFeedback(Component.literal(
-                                "§e[fal] Right-click to place the structure!"));
+                                "§e[fal] Right-click to place, G to rotate!"));
                         LOGGER.info("3D generation process completed, entering placement preview mode");
                         
                     } catch (Exception e) {
@@ -188,7 +188,7 @@ public class GenerateCommand {
         // Send initial feedback
         source.sendFeedback(Component.literal("§e[fal] Starting §bFAST§e 3D generation (" + size + "x" + size + "x" + size + ")"));
         source.sendFeedback(Component.literal("§e[fal] Prompt: \"" + prompt + "\""));
-        source.sendFeedback(Component.literal("§e[fal] Using Z-Image + SAM-3 pipeline (~30 seconds)"));
+        source.sendFeedback(Component.literal("§e[fal] Using Z-Image + Sam-3D pipeline (about 30 seconds)"));
         
         // Run the generation process asynchronously
         new Thread(() -> {
@@ -265,7 +265,7 @@ public class GenerateCommand {
                         source.sendFeedback(Component.literal(
                                 "§a[fal] ✓ §bFAST§a generation complete! " + voxelGrid.voxels().size() + " blocks ready."));
                         source.sendFeedback(Component.literal(
-                                "§e[fal] Right-click to place, R to rotate!"));
+                                "§e[fal] Right-click to place, G to rotate!"));
                         LOGGER.info("FAST 3D generation completed, entering placement preview mode");
                         
                     } catch (Exception e) {

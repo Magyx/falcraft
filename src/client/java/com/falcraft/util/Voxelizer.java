@@ -27,6 +27,10 @@ public class Voxelizer {
     // Distance limit for plane distance test optimization
     private static final double DISTANCE_LIMIT = 2.0; // sqrt(3) ≈ 1.73 with some leeway
     
+    // Saturation boost factor for Sam-3D vertex colors (they tend to be desaturated)
+    // 1.4 = 40% boost (moderate - avoids hue shifts on yellows)
+    private static final float SATURATION_BOOST = 1.0f;
+    
     /**
      * Represents a voxelized 3D model
      */
@@ -661,8 +665,9 @@ public class Voxelizer {
                             // Meshy-6 path: sample from texture using UV
                             color = textureSampler.sample((float) weightedUv.uv.u, (float) weightedUv.uv.v);
                         } else {
-                            // SAM-3 path: use interpolated vertex colors
-                            color = tri.colorCenter();
+                            // Sam-3D path: use interpolated vertex colors with saturation boost
+                            // Sam-3D tends to produce desaturated/pastel colors
+                            color = boostSaturation(tri.colorCenter(), SATURATION_BOOST);
                         }
                         
                         // MAX strategy: triangle with larger weight wins
@@ -695,5 +700,78 @@ public class Voxelizer {
         LOGGER.info("Stats: {} voxel updates", voxelsUpdated);
         
         return new VoxelGrid(voxels, resolution);
+    }
+    
+    /**
+     * Boosts the saturation of an RGB color.
+     * Sam-3D tends to produce desaturated/pastel colors, so we boost them
+     * to get more vibrant Minecraft blocks.
+     * 
+     * @param rgb The input color (packed RGB)
+     * @param factor Saturation multiplier (1.0 = no change, 1.8 = 80% more saturated)
+     * @return The saturated color (packed RGB)
+     */
+    private static int boostSaturation(int rgb, float factor) {
+        // Extract RGB components
+        float r = ((rgb >> 16) & 0xFF) / 255f;
+        float g = ((rgb >> 8) & 0xFF) / 255f;
+        float b = (rgb & 0xFF) / 255f;
+        
+        // RGB to HSL
+        float max = Math.max(r, Math.max(g, b));
+        float min = Math.min(r, Math.min(g, b));
+        float l = (max + min) / 2f;
+        
+        if (max == min) {
+            // Achromatic (gray) - no saturation to boost
+            return rgb;
+        }
+        
+        float d = max - min;
+        float s = l > 0.5f ? d / (2f - max - min) : d / (max + min);
+        
+        // Calculate hue
+        float h;
+        if (max == r) {
+            h = ((g - b) / d + (g < b ? 6f : 0f)) / 6f;
+        } else if (max == g) {
+            h = ((b - r) / d + 2f) / 6f;
+        } else {
+            h = ((r - g) / d + 4f) / 6f;
+        }
+        
+        // Boost saturation (clamp to 1.0)
+        s = Math.min(1.0f, s * factor);
+        
+        // HSL back to RGB
+        float r2, g2, b2;
+        if (s == 0) {
+            r2 = g2 = b2 = l;
+        } else {
+            float q = l < 0.5f ? l * (1f + s) : l + s - l * s;
+            float p = 2f * l - q;
+            r2 = hueToRgb(p, q, h + 1f/3f);
+            g2 = hueToRgb(p, q, h);
+            b2 = hueToRgb(p, q, h - 1f/3f);
+        }
+        
+        // Convert back to packed RGB
+        int ri = Math.min(255, Math.max(0, Math.round(r2 * 255)));
+        int gi = Math.min(255, Math.max(0, Math.round(g2 * 255)));
+        int bi = Math.min(255, Math.max(0, Math.round(b2 * 255)));
+        
+        return (ri << 16) | (gi << 8) | bi;
+    }
+    
+    /**
+     * Helper for HSL to RGB conversion
+     */
+    private static float hueToRgb(float p, float q, float t) {
+        if (t < 0f) t += 1f;
+        if (t > 1f) t -= 1f;
+        if (t < 1f/6f) return p + (q - p) * 6f * t;
+        if (t < 1f/2f) return q;
+        if (t < 2f/3f) return p + (q - p) * (2f/3f - t) * 6f;
+        return p;
     }
 }

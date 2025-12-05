@@ -68,10 +68,10 @@ public class FalcraftClient implements ClientModInitializer {
                 }
                 wasRightClickPressed = isRightClickPressed;
                 
-                // Detect R key for rotation
+                // Detect G key for rotation (not R, as R conflicts with shader reload)
                 boolean isRotateKeyPressed = org.lwjgl.glfw.GLFW.glfwGetKey(
                     Minecraft.getInstance().getWindow().getWindow(),
-                    org.lwjgl.glfw.GLFW.GLFW_KEY_R
+                    org.lwjgl.glfw.GLFW.GLFW_KEY_G
                 ) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
                 
                 if (isRotateKeyPressed && !wasRotateKeyPressed) {
