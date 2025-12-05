@@ -85,7 +85,80 @@ public class BlockMapper {
         BLOCK_PALETTE.put(Blocks.SANDSTONE, 0xE3DBB0);    // Warm tan
         BLOCK_PALETTE.put(Blocks.RED_SANDSTONE, 0xBF6330); // Orange-brown
         
-        LOGGER.info("Initialized curated block palette with {} blocks", BLOCK_PALETTE.size());
+        // ===== EXPANDED PALETTE =====
+        
+        // All remaining terracotta (unique earthy muted tones)
+        BLOCK_PALETTE.put(Blocks.ORANGE_TERRACOTTA, 0xA05325);
+        BLOCK_PALETTE.put(Blocks.BROWN_TERRACOTTA, 0x4D3224);
+        BLOCK_PALETTE.put(Blocks.RED_TERRACOTTA, 0x8F3D2E);
+        BLOCK_PALETTE.put(Blocks.YELLOW_TERRACOTTA, 0xBA8523);
+        BLOCK_PALETTE.put(Blocks.CYAN_TERRACOTTA, 0x575B5B);
+        BLOCK_PALETTE.put(Blocks.BLUE_TERRACOTTA, 0x4A3B5B);
+        BLOCK_PALETTE.put(Blocks.PINK_TERRACOTTA, 0xA14E4E);
+        BLOCK_PALETTE.put(Blocks.MAGENTA_TERRACOTTA, 0x95576C);
+        BLOCK_PALETTE.put(Blocks.PURPLE_TERRACOTTA, 0x764556);
+        BLOCK_PALETTE.put(Blocks.GREEN_TERRACOTTA, 0x4C532A);
+        BLOCK_PALETTE.put(Blocks.LIME_TERRACOTTA, 0x677534);
+        BLOCK_PALETTE.put(Blocks.LIGHT_BLUE_TERRACOTTA, 0x706C89);
+        BLOCK_PALETTE.put(Blocks.BLACK_TERRACOTTA, 0x251610);
+        
+        // Copper oxidation stages (unique teal/green progression)
+        BLOCK_PALETTE.put(Blocks.COPPER_BLOCK, 0xC06A4D);
+        BLOCK_PALETTE.put(Blocks.EXPOSED_COPPER, 0xA07D5D);
+        BLOCK_PALETTE.put(Blocks.WEATHERED_COPPER, 0x6D9466);
+        BLOCK_PALETTE.put(Blocks.OXIDIZED_COPPER, 0x53A384);
+        
+        // More wood types (fills brown/tan spectrum)
+        BLOCK_PALETTE.put(Blocks.SPRUCE_PLANKS, 0x73563A);
+        BLOCK_PALETTE.put(Blocks.JUNGLE_PLANKS, 0xB88856);
+        BLOCK_PALETTE.put(Blocks.ACACIA_PLANKS, 0xB05E3C);
+        BLOCK_PALETTE.put(Blocks.MANGROVE_PLANKS, 0x773636);
+        BLOCK_PALETTE.put(Blocks.CHERRY_PLANKS, 0xE4B4A8);
+        BLOCK_PALETTE.put(Blocks.CRIMSON_PLANKS, 0x6C3A4A);
+        BLOCK_PALETTE.put(Blocks.WARPED_PLANKS, 0x2B6D64);
+        
+        // Unique color blocks
+        BLOCK_PALETTE.put(Blocks.AMETHYST_BLOCK, 0x8B6AA6);
+        BLOCK_PALETTE.put(Blocks.PRISMARINE, 0x63A293);
+        BLOCK_PALETTE.put(Blocks.PRISMARINE_BRICKS, 0x5BA496);
+        BLOCK_PALETTE.put(Blocks.SEA_LANTERN, 0xACDBC5);
+        BLOCK_PALETTE.put(Blocks.MUD_BRICKS, 0x8B6B4D);
+        BLOCK_PALETTE.put(Blocks.PACKED_MUD, 0x8E7259);
+        BLOCK_PALETTE.put(Blocks.TUFF, 0x6C6C66);
+        BLOCK_PALETTE.put(Blocks.MOSS_BLOCK, 0x4F6633);
+        
+        // Nether blocks (unique dark/warm tones)
+        BLOCK_PALETTE.put(Blocks.NETHER_BRICKS, 0x2C151A);
+        BLOCK_PALETTE.put(Blocks.RED_NETHER_BRICKS, 0x45080A);
+        BLOCK_PALETTE.put(Blocks.SHROOMLIGHT, 0xF09B4E);
+        BLOCK_PALETTE.put(Blocks.NETHERRACK, 0x6D3636);
+        BLOCK_PALETTE.put(Blocks.WARPED_WART_BLOCK, 0x167879);
+        BLOCK_PALETTE.put(Blocks.CRIMSON_NYLIUM, 0x8B1F1F);
+        
+        // End blocks
+        BLOCK_PALETTE.put(Blocks.END_STONE, 0xDBDCA6);
+        BLOCK_PALETTE.put(Blocks.END_STONE_BRICKS, 0xDBDEA7);
+        BLOCK_PALETTE.put(Blocks.PURPUR_BLOCK, 0xA87AA4);
+        BLOCK_PALETTE.put(Blocks.PURPUR_PILLAR, 0xAB7FA7);
+        
+        // Wool for soft tones (more muted than concrete)
+        BLOCK_PALETTE.put(Blocks.BROWN_WOOL, 0x724728);
+        BLOCK_PALETTE.put(Blocks.GRAY_WOOL, 0x3E4447);
+        BLOCK_PALETTE.put(Blocks.LIGHT_GRAY_WOOL, 0x8E8E86);
+        BLOCK_PALETTE.put(Blocks.CYAN_WOOL, 0x158991);
+        BLOCK_PALETTE.put(Blocks.PURPLE_WOOL, 0x7B2BAD);
+        BLOCK_PALETTE.put(Blocks.BLUE_WOOL, 0x353A9E);
+        BLOCK_PALETTE.put(Blocks.GREEN_WOOL, 0x546D1B);
+        BLOCK_PALETTE.put(Blocks.RED_WOOL, 0xA12722);
+        BLOCK_PALETTE.put(Blocks.ORANGE_WOOL, 0xF07613);
+        BLOCK_PALETTE.put(Blocks.YELLOW_WOOL, 0xF8C627);
+        BLOCK_PALETTE.put(Blocks.LIME_WOOL, 0x70B919);
+        BLOCK_PALETTE.put(Blocks.PINK_WOOL, 0xED8DAC);
+        BLOCK_PALETTE.put(Blocks.MAGENTA_WOOL, 0xBD44B3);
+        BLOCK_PALETTE.put(Blocks.LIGHT_BLUE_WOOL, 0x3AAFD9);
+        BLOCK_PALETTE.put(Blocks.BLACK_WOOL, 0x141519);
+        
+        LOGGER.info("Initialized expanded block palette with {} blocks", BLOCK_PALETTE.size());
     }
     
     /**
