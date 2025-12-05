@@ -615,8 +615,13 @@ public class FalAPI {
         HttpResponse<String> resultResponse = httpClient.send(resultRequest, HttpResponse.BodyHandlers.ofString());
         
         if (resultResponse.statusCode() != 200) {
-            LOGGER.error("Failed to get SAM-3 result: {} - {}", resultResponse.statusCode(), resultResponse.body());
-            throw new IOException("Failed to get SAM-3 result from fal");
+            String errorBody = resultResponse.body();
+            LOGGER.error("Failed to get Sam-3D result: {} - {}", resultResponse.statusCode(), errorBody);
+            // Include error details in exception for retry logic
+            if (errorBody != null && errorBody.contains("no masks")) {
+                throw new IOException("Sam-3D segmentation failed: no masks produced");
+            }
+            throw new IOException("Failed to get Sam-3D result from fal: " + resultResponse.statusCode());
         }
         
         JsonObject resultJson = GSON.fromJson(resultResponse.body(), JsonObject.class);
@@ -634,7 +639,7 @@ public class FalAPI {
     }
 
     /**
-     * Fast 3D model generation using Z-Image Turbo + SAM-3 pipeline
+     * Fast 3D model generation using Z-Image Turbo + Sam-3D pipeline
      * Much faster than Meshy-6 (~30 seconds vs ~7 minutes)
      * @param prompt The text prompt describing the desired 3D model
      * @return ModelResult containing GLB data
@@ -642,16 +647,28 @@ public class FalAPI {
      * @throws InterruptedException If the thread is interrupted during polling
      */
     public ModelResult generateModelFast(String prompt) throws IOException, InterruptedException {
-        LOGGER.info("=== Starting FAST 3D generation (Z-Image + SAM-3) ===");
+        LOGGER.info("=== Starting FAST 3D generation (Z-Image + Sam-3D) ===");
         LOGGER.info("Prompt: {}", prompt);
         
         // Step 1: Generate 2D image with Z-Image Turbo
         LOGGER.info("Step 1/2: Generating 2D image with Z-Image Turbo...");
         String imageUrl = generateImageWithZImage(prompt);
         
-        // Step 2: Convert image to 3D with SAM-3
-        LOGGER.info("Step 2/2: Converting to 3D with SAM-3...");
-        ModelResult result = generate3DWithSam3(imageUrl, prompt);
+        // Step 2: Convert image to 3D with Sam-3D
+        // If segmentation fails with the original prompt, retry with generic "figure"
+        LOGGER.info("Step 2/2: Converting to 3D with Sam-3D...");
+        ModelResult result;
+        try {
+            result = generate3DWithSam3(imageUrl, prompt);
+        } catch (IOException e) {
+            // Check if this is a segmentation failure (no masks found)
+            if (e.getMessage() != null && e.getMessage().contains("no masks")) {
+                LOGGER.warn("Sam-3D segmentation failed with prompt '{}', retrying with 'figure'...", prompt);
+                result = generate3DWithSam3(imageUrl, "figure");
+            } else {
+                throw e; // Re-throw other errors
+            }
+        }
         
         LOGGER.info("=== FAST 3D generation complete! ===");
         return result;
