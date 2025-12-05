@@ -27,7 +27,7 @@ import com.mojang.brigadier.suggestion.SuggestionProvider;
 
 /**
  * Command to generate 3D models from text prompts using fal AI
- * Usage: /fal generate <size> <prompt>          - Z-Image + Sam-3D (~30 seconds, default)
+ * Usage: /fal generate <size> <prompt>          - Z-Image + SAM-3D (~30 seconds, default)
  *        /fal generate legacy <size> <prompt>   - Meshy-6 (~7 minutes, original method)
  * Size: 16-128 (recommended: 32=fast, 48=balanced, 64=detailed)
  */
@@ -50,7 +50,7 @@ public class GenerateCommand {
     public static void register(CommandDispatcher<FabricClientCommandSource> dispatcher) {
         dispatcher.register(literal("fal")
                 .then(literal("generate")
-                        // Default mode: /fal generate <size> <prompt> (Z-Image + Sam-3D)
+                        // Default mode: /fal generate <size> <prompt> (Z-Image + SAM-3D)
                         .then(argument("size", IntegerArgumentType.integer(16, 128))
                                 .suggests(SIZE_SUGGESTIONS)
                                 .then(argument("prompt", StringArgumentType.greedyString())
@@ -198,7 +198,7 @@ public class GenerateCommand {
     }
     
     /**
-     * Default generation mode using Z-Image Turbo + Sam-3D pipeline
+     * Default generation mode using Z-Image Turbo + SAM-3D pipeline
      * Fast and high quality (~30 seconds)
      */
     private static int execute(CommandContext<FabricClientCommandSource> context) {
@@ -209,7 +209,7 @@ public class GenerateCommand {
         // Send initial feedback
         source.sendFeedback(Component.literal("§e[fal] Starting 3D generation (" + size + "x" + size + "x" + size + ")"));
         source.sendFeedback(Component.literal("§e[fal] Prompt: \"" + prompt + "\""));
-        source.sendFeedback(Component.literal("§e[fal] Using Z-Image + Sam-3D (about 30 seconds)"));
+        source.sendFeedback(Component.literal("§e[fal] Using Z-Image + SAM-3D (about 30 seconds)"));
         
         // Run the generation process asynchronously
         new Thread(() -> {

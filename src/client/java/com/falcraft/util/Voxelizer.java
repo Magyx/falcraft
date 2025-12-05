@@ -27,7 +27,7 @@ public class Voxelizer {
     // Distance limit for plane distance test optimization
     private static final double DISTANCE_LIMIT = 2.0; // sqrt(3) ≈ 1.73 with some leeway
     
-    // Saturation boost factor for Sam-3D vertex colors (they tend to be desaturated)
+    // Saturation boost factor for SAM-3D vertex colors (they tend to be desaturated)
     // 1.4 = 40% boost (moderate - avoids hue shifts on yellows)
     private static final float SATURATION_BOOST = 1.0f;
     
@@ -665,8 +665,8 @@ public class Voxelizer {
                             // Meshy-6 path: sample from texture using UV
                             color = textureSampler.sample((float) weightedUv.uv.u, (float) weightedUv.uv.v);
                         } else {
-                            // Sam-3D path: use interpolated vertex colors with saturation boost
-                            // Sam-3D tends to produce desaturated/pastel colors
+                            // SAM-3D path: use interpolated vertex colors with saturation boost
+                            // SAM-3D tends to produce desaturated/pastel colors
                             color = boostSaturation(tri.colorCenter(), SATURATION_BOOST);
                         }
                         
@@ -704,7 +704,7 @@ public class Voxelizer {
     
     /**
      * Boosts the saturation of an RGB color.
-     * Sam-3D tends to produce desaturated/pastel colors, so we boost them
+     * SAM-3D tends to produce desaturated/pastel colors, so we boost them
      * to get more vibrant Minecraft blocks.
      * 
      * @param rgb The input color (packed RGB)
