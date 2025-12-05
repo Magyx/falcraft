@@ -65,8 +65,10 @@ public class GhostBlockRenderer {
         RenderSystem.setShader(GameRenderer::getPositionColorShader);
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
-        RenderSystem.disableDepthTest();
-        RenderSystem.depthMask(false);
+        // Enable depth TEST and MASK so ghost blocks render solidly and occlude the world
+        // This makes the preview look more like the actual placed structure
+        RenderSystem.enableDepthTest();
+        RenderSystem.depthMask(true);
         
         Matrix4f matrix = poseStack.last().pose();
         Tesselator tesselator = Tesselator.getInstance();
