@@ -53,7 +53,7 @@ Point at any block and run:
    ```
    Get your API key at [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys)
    
-   **Note:** Wrap your API key in quotes to handle special characters.
+   **Note:** Wrap your API key in quotes to handle the special characters.
 
 That's it! Your key is saved to `config/falcraft/api-key.txt`.
 
