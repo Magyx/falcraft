@@ -23,6 +23,7 @@ public class FalAPI {
     private static final String FAL_3D_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/meshy/v6-preview/text-to-3d";
     private static final String FAL_ZIMAGE_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/z-image/turbo";
     private static final String FAL_SAM3_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/sam-3/3d-objects";
+    private static final String FAL_VLM_QUEUE_SUBMIT = "https://queue.fal.run/openrouter/router/vision";
     private static final Gson GSON = new Gson();
     private final HttpClient httpClient;
     private final String apiKey;
@@ -578,8 +579,121 @@ public class FalAPI {
     }
 
     /**
+     * Uses a Vision Language Model to describe an image for better SAM-3D segmentation.
+     * When SAM-3D fails because the user prompt is too abstract (e.g. "A grand Minecraft lobby"),
+     * this method analyzes the actual generated image and produces a concrete description
+     * that SAM-3D can use for segmentation.
+     * 
+     * @param imageUrl The URL of the image to describe
+     * @param originalPrompt The original user prompt (for context)
+     * @return A concrete, visual description suitable for SAM-3D segmentation
+     * @throws IOException If network operations fail
+     * @throws InterruptedException If the thread is interrupted during polling
+     */
+    public String describeImageForSegmentation(String imageUrl, String originalPrompt) throws IOException, InterruptedException {
+        // System prompt instructs the VLM to produce a concrete, segmentation-friendly description
+        String systemPrompt = "Describe the main subject in this image in simple, concrete, visual terms " +
+                "for object segmentation. Focus on physical appearance, not abstract concepts. " +
+                "Keep it very short (under 10 words). " +
+                "Examples: 'A stone castle with towers', 'A medieval building', 'A character figure', 'A wooden house'. " +
+                "Just output the description, nothing else.";
+        
+        // Build request body
+        JsonObject requestBody = new JsonObject();
+        JsonArray imageUrls = new JsonArray();
+        imageUrls.add(imageUrl);
+        requestBody.add("image_urls", imageUrls);
+        requestBody.addProperty("prompt", "What is the main subject in this image? The original request was: " + originalPrompt);
+        requestBody.addProperty("system_prompt", systemPrompt);
+        requestBody.addProperty("model", "google/gemini-2.5-flash");
+        
+        String requestBodyJson = GSON.toJson(requestBody);
+        
+        HttpRequest submitRequest = HttpRequest.newBuilder()
+                .uri(URI.create(FAL_VLM_QUEUE_SUBMIT))
+                .header("Authorization", "Key " + apiKey)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
+                .build();
+        
+        HttpResponse<String> submitResponse = httpClient.send(submitRequest, HttpResponse.BodyHandlers.ofString());
+        
+        if (submitResponse.statusCode() != 200) {
+            LOGGER.error("VLM queue submit error: {} - {}", submitResponse.statusCode(), submitResponse.body());
+            throw new IOException("Failed to submit VLM request: " + submitResponse.statusCode());
+        }
+        
+        JsonObject submitJson = GSON.fromJson(submitResponse.body(), JsonObject.class);
+        String responseUrl = submitJson.get("response_url").getAsString();
+        String statusUrl = submitJson.get("status_url").getAsString();
+        
+        // Poll for completion (VLM is fast, usually 2-5 seconds)
+        boolean completed = false;
+        int attempts = 0;
+        int maxAttempts = 30;
+        
+        while (!completed && attempts < maxAttempts) {
+            Thread.sleep(1000);
+            attempts++;
+            
+            HttpRequest statusRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(statusUrl))
+                    .header("Authorization", "Key " + apiKey)
+                    .GET()
+                    .build();
+            
+            HttpResponse<String> statusResponse = httpClient.send(statusRequest, HttpResponse.BodyHandlers.ofString());
+            
+            if (statusResponse.statusCode() == 200 || statusResponse.statusCode() == 202) {
+                JsonObject statusJson = GSON.fromJson(statusResponse.body(), JsonObject.class);
+                String status = statusJson.get("status").getAsString();
+                
+                if ("COMPLETED".equals(status)) {
+                    completed = true;
+                } else if ("FAILED".equals(status)) {
+                    throw new IOException("VLM request failed");
+                }
+            }
+        }
+        
+        if (!completed) {
+            throw new IOException("VLM request timed out");
+        }
+        
+        // Get the result
+        HttpRequest resultRequest = HttpRequest.newBuilder()
+                .uri(URI.create(responseUrl))
+                .header("Authorization", "Key " + apiKey)
+                .GET()
+                .build();
+        
+        HttpResponse<String> resultResponse = httpClient.send(resultRequest, HttpResponse.BodyHandlers.ofString());
+        
+        if (resultResponse.statusCode() != 200) {
+            LOGGER.error("Failed to get VLM result: {} - {}", resultResponse.statusCode(), resultResponse.body());
+            throw new IOException("Failed to get VLM result");
+        }
+        
+        JsonObject resultJson = GSON.fromJson(resultResponse.body(), JsonObject.class);
+        String description = resultJson.get("output").getAsString().trim();
+        
+        // Clean up the description - remove quotes, periods, etc.
+        description = description.replaceAll("^[\"']|[\"']$", "").trim();
+        if (description.endsWith(".")) {
+            description = description.substring(0, description.length() - 1);
+        }
+        
+        LOGGER.info("VLM described image as: '{}'", description);
+        return description;
+    }
+
+    /**
      * Fast 3D model generation using Z-Image Turbo + SAM-3D pipeline
      * Much faster than Meshy-6 (~30 seconds vs ~7 minutes)
+     * 
+     * If SAM-3D fails to segment with the user's prompt (too abstract),
+     * we use a VLM to analyze the actual image and produce a better description.
+     * 
      * @param prompt The text prompt describing the desired 3D model
      * @return ModelResult containing GLB data
      * @throws IOException If network operations fail
@@ -590,15 +704,25 @@ public class FalAPI {
         String imageUrl = generateImageWithZImage(prompt);
         
         // Step 2: Convert image to 3D with SAM-3D
-        // If segmentation fails with the original prompt, retry with generic "figure"
+        // If segmentation fails, use VLM to get a better description, then fall back to "figure"
         ModelResult result;
         try {
             result = generate3DWithSam3(imageUrl, prompt);
         } catch (IOException e) {
             // Check if this is a segmentation failure (no masks found)
             if (e.getMessage() != null && e.getMessage().contains("no masks")) {
-                LOGGER.warn("SAM-3D segmentation failed, retrying with generic prompt...");
-                result = generate3DWithSam3(imageUrl, "figure");
+                LOGGER.warn("SAM-3D segmentation failed with original prompt, using VLM to analyze image...");
+                
+                // Try using VLM to get a better description
+                try {
+                    String betterPrompt = describeImageForSegmentation(imageUrl, prompt);
+                    LOGGER.info("Retrying SAM-3D with VLM description: '{}'", betterPrompt);
+                    result = generate3DWithSam3(imageUrl, betterPrompt);
+                } catch (IOException vlmError) {
+                    // VLM failed or SAM-3D still failed - use ultimate fallback
+                    LOGGER.warn("VLM approach failed, using generic 'figure' fallback...");
+                    result = generate3DWithSam3(imageUrl, "figure");
+                }
             } else {
                 throw e; // Re-throw other errors
             }

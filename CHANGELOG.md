@@ -14,10 +14,12 @@ All notable changes to Falcraft will be documented in this file.
 - Animated block-by-block placement
 - Support for structures up to 128x128x128 blocks
 - Expanded block palette with 105 Minecraft blocks for accurate color matching
+- Smart VLM fallback: When abstract prompts fail SAM-3D segmentation, a Vision Language Model analyzes the image and provides a concrete description for retry
 
 ### Technical
 - Triangle splitting voxelization algorithm (based on obj2voxel)
 - GLB parsing with support for both UV-mapped textures and vertex colors
 - CIE LAB color space matching for accurate block selection
 - Surface voxel extraction for efficient preview rendering
+- VLM-assisted retry logic using Gemini 2.5 Flash for improved segmentation reliability
 
