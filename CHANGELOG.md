@@ -8,6 +8,8 @@ All notable changes to Falcraft will be documented in this file.
 - `/fal generate <size> <prompt>` - AI-powered 3D structure generation using Z-Image + SAM-3D pipeline (~30 seconds)
 - `/fal generate legacy <size> <prompt>` - Original Meshy-6 pipeline for high-quality results (~7 minutes)
 - `/fal remix` - AI texture remixing for existing blocks
+- `/fal setkey <key>` - Configure your fal.ai API key in-game
+- `/fal status` - Check API key configuration status
 - Ghost block preview system showing the structure before placement
 - Rotation support (press G to rotate 90°)
 - Distance control (scroll wheel to adjust preview distance)

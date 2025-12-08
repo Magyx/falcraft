@@ -1,5 +1,6 @@
 package com.falcraft;
 
+import com.falcraft.commands.ConfigCommand;
 import com.falcraft.commands.GenerateCommand;
 import com.falcraft.commands.RemixCommand;
 import com.falcraft.render.GhostBlockRenderer;
@@ -23,6 +24,7 @@ public class FalcraftClient implements ClientModInitializer {
     public void onInitializeClient() {
         // Register the client-side commands
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
+            ConfigCommand.register(dispatcher);
             RemixCommand.register(dispatcher);
             GenerateCommand.register(dispatcher);
         });

@@ -1,5 +1,6 @@
 package com.falcraft.util;
 
+import com.falcraft.commands.ConfigCommand;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonArray;
@@ -35,89 +36,12 @@ public class FalAPI {
 
     public FalAPI() {
         this.httpClient = HttpClient.newHttpClient();
-        this.apiKey = loadApiKey();
+        this.apiKey = ConfigCommand.getApiKey();
         
         if (apiKey == null || apiKey.isEmpty()) {
-            LOGGER.error("FAL_API_KEY not found! Please set it in .env file or as environment variable.");
-            throw new IllegalStateException("FAL_API_KEY is required. Create a .env file in the Minecraft directory with: FAL_API_KEY=your-key-here");
+            LOGGER.error("FAL_API_KEY not found! Use /fal setkey <key> to configure.");
+            throw new IllegalStateException("API key not configured. Use /fal setkey <your-key> to set it up. Get a key at https://fal.ai/dashboard/keys");
         }
-        
-        LOGGER.info("fal API key loaded successfully");
-    }
-    
-    /**
-     * Loads the API key from .env file or environment variable
-     * Priority: .env file in game directory > .env file in config directory > environment variable
-     */
-    private String loadApiKey() {
-        // Try loading from .env file in game directory
-        File gameDir = Minecraft.getInstance().gameDirectory;
-        Path envFile = gameDir.toPath().resolve(".env");
-        
-        if (Files.exists(envFile)) {
-            try {
-                String key = readApiKeyFromEnvFile(envFile);
-                if (key != null && !key.isEmpty()) {
-                    return key;
-                }
-            } catch (IOException e) {
-                LOGGER.warn("Failed to read .env file: {}", e.getMessage());
-            }
-        }
-        
-        // Try loading from .env file in config directory
-        Path configEnvFile = gameDir.toPath().resolve("config").resolve("falcraft").resolve(".env");
-        if (Files.exists(configEnvFile)) {
-            try {
-                String key = readApiKeyFromEnvFile(configEnvFile);
-                if (key != null && !key.isEmpty()) {
-                    return key;
-                }
-            } catch (IOException e) {
-                LOGGER.warn("Failed to read config .env file: {}", e.getMessage());
-            }
-        }
-        
-        // Fall back to environment variable
-        String envKey = System.getenv("FAL_API_KEY");
-        if (envKey != null && !envKey.isEmpty()) {
-            return envKey;
-        }
-        
-        return null;
-    }
-    
-    /**
-     * Reads the FAL_API_KEY from a .env file
-     * Supports formats: FAL_API_KEY=value or FAL_API_KEY="value"
-     */
-    private String readApiKeyFromEnvFile(Path envFile) throws IOException {
-        String content = Files.readString(envFile);
-        
-        for (String line : content.split("\\r?\\n")) {
-            line = line.trim();
-            
-            // Skip comments and empty lines
-            if (line.isEmpty() || line.startsWith("#")) {
-                continue;
-            }
-            
-            // Look for FAL_API_KEY=value
-            if (line.startsWith("FAL_API_KEY=")) {
-                String value = line.substring("FAL_API_KEY=".length()).trim();
-                
-                // Remove surrounding quotes if present
-                if (value.startsWith("\"") && value.endsWith("\"")) {
-                    value = value.substring(1, value.length() - 1);
-                } else if (value.startsWith("'") && value.endsWith("'")) {
-                    value = value.substring(1, value.length() - 1);
-                }
-                
-                return value;
-            }
-        }
-        
-        return null;
     }
 
     /**

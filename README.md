@@ -46,17 +46,20 @@ Point at any block and run:
 ## 🚀 Setup
 
 1. Install [Fabric Loader](https://fabricmc.net/use/) + [Fabric API](https://modrinth.com/mod/fabric-api) for MC 1.21.1
-2. Get API key from [fal.ai](https://fal.ai)
-3. Create `.env` in your Minecraft game directory with your API key:
+2. Drop the mod JAR in `.minecraft/mods/`
+3. Launch Minecraft and run:
+   ```
+   /fal setkey YOUR_API_KEY
+   ```
+   Get your API key at [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys)
 
+That's it! Your key is saved to `config/falcraft/api-key.txt`.
+
+### Check Status
 ```
-FAL_API_KEY=your_key_here
+/fal status
 ```
-
-   - **Users**: `.minecraft/.env`
-   - **Developers**: `run/.env` (when using `./gradlew runClient`)
-
-4. Drop the mod JAR in `.minecraft/mods/`
+Shows if your API key is configured.
 
 ## 🧠 How It Works
 
@@ -69,7 +72,7 @@ FAL_API_KEY=your_key_here
 
 ## 🐛 Troubleshooting
 
-- **"FAL_API_KEY not found"** - Create `.env` in `.minecraft/` with your key
+- **"API key not configured"** - Run `/fal setkey YOUR_KEY` or check with `/fal status`
 - **Structure not visible** - Look where you want to place (up to 200 blocks away)
 - **Colors look off** - The 100+ block palette maps colors as close as Minecraft allows
 
