@@ -49,9 +49,11 @@ Point at any block and run:
 2. Drop the mod JAR in `.minecraft/mods/`
 3. Launch Minecraft and run:
    ```
-   /fal setkey YOUR_API_KEY
+   /fal setkey "YOUR_API_KEY"
    ```
    Get your API key at [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys)
+   
+   **Note:** Wrap your API key in quotes to handle special characters.
 
 That's it! Your key is saved to `config/falcraft/api-key.txt`.
 
@@ -72,7 +74,7 @@ Shows if your API key is configured.
 
 ## 🐛 Troubleshooting
 
-- **"API key not configured"** - Run `/fal setkey YOUR_KEY` or check with `/fal status`
+- **"API key not configured"** - Run `/fal setkey "YOUR_KEY"` (with quotes) or check with `/fal status`
 - **Structure not visible** - Look where you want to place (up to 200 blocks away)
 - **Colors look off** - The 100+ block palette maps colors as close as Minecraft allows
 
