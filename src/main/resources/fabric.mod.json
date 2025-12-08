@@ -3,7 +3,7 @@
 	"id": "falcraft",
 	"version": "${version}",
 	"name": "Falcraft",
-	"description": "AI-powered texture remixing for Minecraft! Point at any block and remix its texture using fal.",
+	"description": "AI-powered 3D structure generation for Minecraft! Generate castles, characters, and more with /fal generate using fal.ai",
 	"authors": [
 		"Falcraft Team"
 	],
@@ -13,7 +13,7 @@
 		"issues": "https://github.com/blendi-remade/falcraft/issues"
 	},
 	"license": "CC0-1.0",
-	"icon": "assets/modid/icon.png",
+	"icon": "assets/falcraft/icon.png",
 	"environment": "*",
 	"entrypoints": {
 		"main": [
@@ -24,9 +24,9 @@
 		]
 	},
 	"mixins": [
-		"modid.mixins.json",
+		"falcraft.mixins.json",
 		{
-			"config": "modid.client.mixins.json",
+			"config": "falcraft.client.mixins.json",
 			"environment": "client"
 		}
 	],
