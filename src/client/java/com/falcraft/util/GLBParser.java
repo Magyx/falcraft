@@ -43,8 +43,6 @@ public class GLBParser {
      * @return The texture as a byte array (PNG or JPEG), or null if no embedded texture
      */
     public static byte[] extractEmbeddedTexture(byte[] glbData) throws IOException {
-        LOGGER.info("Extracting embedded texture from GLB...");
-        
         ByteBuffer buffer = ByteBuffer.wrap(glbData);
         buffer.order(ByteOrder.LITTLE_ENDIAN);
         
@@ -74,30 +72,23 @@ public class GLBParser {
         
         // Check for embedded images
         if (!gltf.has("images")) {
-            LOGGER.info("No images found in GLB");
             return null;
         }
         
         JsonArray images = gltf.getAsJsonArray("images");
         if (images.isEmpty()) {
-            LOGGER.info("Images array is empty");
             return null;
         }
         
         // Get first image
         JsonObject image = images.get(0).getAsJsonObject();
-        LOGGER.info("Found image: {}", image);
         
         // Check if image is embedded (has bufferView) or external (has uri)
         if (!image.has("bufferView")) {
-            LOGGER.info("Image is not embedded (no bufferView)");
             return null;
         }
         
         int bufferViewIndex = image.get("bufferView").getAsInt();
-        String mimeType = image.has("mimeType") ? image.get("mimeType").getAsString() : "image/png";
-        
-        LOGGER.info("Image is embedded with bufferView {}, mimeType: {}", bufferViewIndex, mimeType);
         
         // Get buffer view
         JsonArray bufferViews = gltf.getAsJsonArray("bufferViews");
@@ -106,13 +97,10 @@ public class GLBParser {
         int byteOffset = bufferView.has("byteOffset") ? bufferView.get("byteOffset").getAsInt() : 0;
         int byteLength = bufferView.get("byteLength").getAsInt();
         
-        LOGGER.info("Extracting texture: offset={}, length={}", byteOffset, byteLength);
-        
         // Extract texture data from binary buffer
         byte[] textureData = new byte[byteLength];
         System.arraycopy(binData, byteOffset, textureData, 0, byteLength);
         
-        LOGGER.info("Successfully extracted embedded texture ({} bytes)", textureData.length);
         return textureData;
     }
     
@@ -126,8 +114,6 @@ public class GLBParser {
      * @throws IOException If the GLB format is invalid
      */
     public static MeshData parse(byte[] glbData, TextureSampler textureSampler) throws IOException {
-        LOGGER.info("Parsing GLB file ({} bytes)", glbData.length);
-        
         ByteBuffer buffer = ByteBuffer.wrap(glbData);
         buffer.order(ByteOrder.LITTLE_ENDIAN);
         
@@ -139,8 +125,6 @@ public class GLBParser {
         
         int version = buffer.getInt();
         int length = buffer.getInt();
-        
-        LOGGER.info("GLB version: {}, length: {}", version, length);
         
         // Parse JSON chunk
         int jsonChunkLength = buffer.getInt();
@@ -155,7 +139,6 @@ public class GLBParser {
         String jsonString = new String(jsonBytes);
         
         JsonObject gltf = GSON.fromJson(jsonString, JsonObject.class);
-        LOGGER.info("Parsed glTF JSON");
         
         // Parse BIN chunk
         int binChunkLength = buffer.getInt();
@@ -168,8 +151,6 @@ public class GLBParser {
         byte[] binData = new byte[binChunkLength];
         buffer.get(binData);
         
-        LOGGER.info("Extracted binary data ({} bytes)", binData.length);
-        
         // Extract mesh data from glTF structure
         return extractMeshData(gltf, binData);
     }
@@ -179,19 +160,6 @@ public class GLBParser {
      * UV coordinates are passed through for per-voxel sampling in the Voxelizer
      */
     private static MeshData extractMeshData(JsonObject gltf, byte[] binData) throws IOException {
-        LOGGER.info("Extracting mesh data from glTF structure");
-        
-        // Log texture/image information from GLB
-        if (gltf.has("textures")) {
-            LOGGER.info("GLB contains textures: {}", gltf.get("textures"));
-        }
-        if (gltf.has("images")) {
-            LOGGER.info("GLB contains images: {}", gltf.get("images"));
-        }
-        if (gltf.has("materials")) {
-            LOGGER.info("GLB contains materials: {}", gltf.get("materials"));
-        }
-        
         JsonArray meshes = gltf.getAsJsonArray("meshes");
         if (meshes == null || meshes.isEmpty()) {
             throw new IOException("No meshes found in glTF");
@@ -217,8 +185,6 @@ public class GLBParser {
             int positionAccessorIndex = attributes.get("POSITION").getAsInt();
             float[] positions = extractFloatArray(gltf, binData, positionAccessorIndex);
             
-            LOGGER.info("Primitive {}: {} vertices", i, positions.length / 3);
-            
             // Extract indices
             if (primitive.has("indices")) {
                 int indicesAccessorIndex = primitive.get("indices").getAsInt();
@@ -240,20 +206,6 @@ public class GLBParser {
             if (attributes.has("TEXCOORD_0")) {
                 int uvAccessorIndex = attributes.get("TEXCOORD_0").getAsInt();
                 uvs = extractFloatArray(gltf, binData, uvAccessorIndex);
-                LOGGER.info("Primitive {}: Found TEXCOORD_0 with {} UVs", i, uvs.length / 2);
-                
-                // Log UV coordinate range for debugging
-                float minU = Float.MAX_VALUE, maxU = Float.MIN_VALUE;
-                float minV = Float.MAX_VALUE, maxV = Float.MIN_VALUE;
-                for (int j = 0; j < uvs.length; j += 2) {
-                    minU = Math.min(minU, uvs[j]);
-                    maxU = Math.max(maxU, uvs[j]);
-                    minV = Math.min(minV, uvs[j + 1]);
-                    maxV = Math.max(maxV, uvs[j + 1]);
-                }
-                LOGGER.info("Primitive {}: UV range - U: [{}, {}], V: [{}, {}]", i, minU, maxU, minV, maxV);
-            } else {
-                LOGGER.warn("Primitive {}: No TEXCOORD_0 found - texture sampling will not work!", i);
             }
             
             // Generate fallback colors from vertex colors or position-based
@@ -263,10 +215,8 @@ public class GLBParser {
                 // Use vertex colors from GLB
                 int colorAccessorIndex = attributes.get("COLOR_0").getAsInt();
                 colors = extractColorArray(gltf, binData, colorAccessorIndex);
-                LOGGER.info("Primitive {}: Found COLOR_0 attribute with {} colors", i, colors.length);
             } else {
                 // Generate fallback colors based on vertex position
-                LOGGER.info("Primitive {}: No COLOR_0, generating position-based fallback colors", i);
                 colors = new int[positions.length / 3];
                 for (int j = 0; j < colors.length; j++) {
                     // Generate varied colors based on position (normalized)
@@ -315,9 +265,6 @@ public class GLBParser {
         for (int i = 0; i < allUVs.size(); i++) {
             uvs[i] = allUVs.get(i);
         }
-        
-        LOGGER.info("Extracted mesh: {} vertices, {} indices, {} colors, {} UVs",
-                vertices.length / 3, indices.length, colors.length, uvs.length / 2);
         
         return new MeshData(vertices, indices, colors, uvs);
     }
@@ -410,9 +357,6 @@ public class GLBParser {
         int componentsPerVertex = getComponentCount(type); // 3 for VEC3, 4 for VEC4
         int totalOffset = bufferViewOffset + byteOffset;
         
-        LOGGER.info("Extracting COLOR_0: count={}, componentType={}, type={} ({}), offset={}", 
-            count, componentType, type, componentsPerVertex, totalOffset);
-        
         ByteBuffer buffer = ByteBuffer.wrap(binData);
         buffer.order(ByteOrder.LITTLE_ENDIAN);
         buffer.position(totalOffset);
@@ -445,31 +389,7 @@ public class GLBParser {
             int gi = Math.min(255, Math.max(0, (int) (g * 255)));
             int bi = Math.min(255, Math.max(0, (int) (b * 255)));
             colors[i] = (ri << 16) | (gi << 8) | bi;
-            
-            // Debug: log first few colors to see what we're getting
-            if (i < 10 || (i % 50000 == 0)) {
-                LOGGER.info("  Color[{}]: RGB({}, {}, {}) = 0x{}", i, ri, gi, bi, Integer.toHexString(colors[i]));
-            }
         }
-        
-        // Analyze color distribution
-        int minR = 255, maxR = 0, minG = 255, maxG = 0, minB = 255, maxB = 0;
-        int grayCount = 0;
-        for (int color : colors) {
-            int cr = (color >> 16) & 0xFF;
-            int cg = (color >> 8) & 0xFF;
-            int cb = color & 0xFF;
-            minR = Math.min(minR, cr); maxR = Math.max(maxR, cr);
-            minG = Math.min(minG, cg); maxG = Math.max(maxG, cg);
-            minB = Math.min(minB, cb); maxB = Math.max(maxB, cb);
-            // Count "gray-ish" colors where R≈G≈B
-            if (Math.abs(cr - cg) < 10 && Math.abs(cg - cb) < 10 && Math.abs(cr - cb) < 10) {
-                grayCount++;
-            }
-        }
-        LOGGER.info("Extracted {} vertex colors", colors.length);
-        LOGGER.info("Color range: R=[{}-{}], G=[{}-{}], B=[{}-{}]", minR, maxR, minG, maxG, minB, maxB);
-        LOGGER.info("Gray-ish colors: {}/{} ({:.1f}%)", grayCount, colors.length, (100.0 * grayCount / colors.length));
         
         return colors;
     }

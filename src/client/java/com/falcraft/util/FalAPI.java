@@ -53,22 +53,15 @@ public class FalAPI {
         File gameDir = Minecraft.getInstance().gameDirectory;
         Path envFile = gameDir.toPath().resolve(".env");
         
-        LOGGER.info("Looking for .env file at: {}", envFile.toAbsolutePath());
-        LOGGER.info("File exists: {}", Files.exists(envFile));
-        
         if (Files.exists(envFile)) {
             try {
                 String key = readApiKeyFromEnvFile(envFile);
                 if (key != null && !key.isEmpty()) {
-                    LOGGER.info("✓ Loaded API key from .env file: {}", envFile);
                     return key;
                 }
-                LOGGER.warn("✗ .env file exists but FAL_API_KEY not found or empty");
             } catch (IOException e) {
-                LOGGER.warn("Failed to read .env file: {}", envFile, e);
+                LOGGER.warn("Failed to read .env file: {}", e.getMessage());
             }
-        } else {
-            LOGGER.warn("✗ .env file not found at: {}", envFile.toAbsolutePath());
         }
         
         // Try loading from .env file in config directory
@@ -77,18 +70,16 @@ public class FalAPI {
             try {
                 String key = readApiKeyFromEnvFile(configEnvFile);
                 if (key != null && !key.isEmpty()) {
-                    LOGGER.info("Loaded API key from config .env file: {}", configEnvFile);
                     return key;
                 }
             } catch (IOException e) {
-                LOGGER.warn("Failed to read config .env file: {}", configEnvFile, e);
+                LOGGER.warn("Failed to read config .env file: {}", e.getMessage());
             }
         }
         
         // Fall back to environment variable
         String envKey = System.getenv("FAL_API_KEY");
         if (envKey != null && !envKey.isEmpty()) {
-            LOGGER.info("Loaded API key from environment variable");
             return envKey;
         }
         
@@ -143,7 +134,6 @@ public class FalAPI {
         String base64Data = Base64.getEncoder().encodeToString(fileBytes);
         String dataUri = "data:image/png;base64," + base64Data;
         
-        LOGGER.info("Converted texture to data URI ({} bytes)", fileBytes.length);
         
         // Step 2: Submit the request to the queue
         JsonObject requestBody = new JsonObject();
@@ -156,8 +146,7 @@ public class FalAPI {
         requestBody.addProperty("num_images", 1);
         requestBody.addProperty("output_format", "png");
         
-        String requestBodyJson = GSON.toJson(requestBody);        
-        LOGGER.info("Submitting request to fal queue...");
+        String requestBodyJson = GSON.toJson(requestBody);
         
         HttpRequest submitRequest = HttpRequest.newBuilder()
                 .uri(URI.create(FAL_QUEUE_SUBMIT))
@@ -178,12 +167,7 @@ public class FalAPI {
         String responseUrl = submitJson.get("response_url").getAsString();
         String statusUrl = submitJson.get("status_url").getAsString();
         
-        LOGGER.info("Request submitted with ID: {}", requestId);
-        LOGGER.info("Status URL: {}", statusUrl);
-        LOGGER.info("Response URL: {}", responseUrl);
-        
         // Step 3: Poll for completion
-        LOGGER.info("Polling for completion...");
         
         boolean completed = false;
         int attempts = 0;
@@ -213,8 +197,6 @@ public class FalAPI {
                 } else if ("FAILED".equals(status)) {
                     throw new IOException("fal request failed");
                 }
-            } else {
-                LOGGER.warn("Unexpected status code {}, continuing to poll...", statusResponse.statusCode());
             }
         }
         
@@ -222,8 +204,7 @@ public class FalAPI {
             throw new IOException("Request timed out after " + maxAttempts + " attempts");
         }
         
-        // Step 4: Get the result using the response_url from submit
-        LOGGER.info("Fetching result from response URL...");
+        // Step 4: Get the result
         
         HttpRequest resultRequest = HttpRequest.newBuilder()
                 .uri(URI.create(responseUrl))
@@ -238,13 +219,10 @@ public class FalAPI {
             throw new IOException("Failed to get result from fal");
         }
         
-        LOGGER.info("Got result, parsing...");
         JsonObject resultJson = GSON.fromJson(resultResponse.body(), JsonObject.class);
         String imageUrl = resultJson.getAsJsonArray("images")
                 .get(0).getAsJsonObject()
                 .get("url").getAsString();
-        
-        LOGGER.info("Downloading result image from: {}", imageUrl);
         
         // Step 5: Download the result image
         return downloadImage(imageUrl);
@@ -267,7 +245,6 @@ public class FalAPI {
         requestBody.addProperty("topology", "quad"); // Quad topology for cleaner UV layouts
         
         String requestBodyJson = GSON.toJson(requestBody);
-        LOGGER.info("Submitting 3D generation request to fal queue...");
         
         HttpRequest submitRequest = HttpRequest.newBuilder()
                 .uri(URI.create(FAL_3D_QUEUE_SUBMIT))
@@ -288,12 +265,7 @@ public class FalAPI {
         String responseUrl = submitJson.get("response_url").getAsString();
         String statusUrl = submitJson.get("status_url").getAsString();
         
-        LOGGER.info("3D generation request submitted with ID: {}", requestId);
-        LOGGER.info("Status URL: {}", statusUrl);
-        LOGGER.info("Response URL: {}", responseUrl);
-        
         // Step 2: Poll for completion (3D generation takes longer, so increase timeout)
-        LOGGER.info("Polling for 3D generation completion...");
         
         boolean completed = false;
         int attempts = 0;
@@ -316,15 +288,11 @@ public class FalAPI {
                 JsonObject statusJson = GSON.fromJson(statusResponse.body(), JsonObject.class);
                 String status = statusJson.get("status").getAsString();
                 
-                LOGGER.info("Status check {}/{}: {}", attempts, maxAttempts, status);
-                
                 if ("COMPLETED".equals(status)) {
                     completed = true;
                 } else if ("FAILED".equals(status)) {
                     throw new IOException("fal 3D generation request failed");
                 }
-            } else {
-                LOGGER.warn("Unexpected status code {}, continuing to poll...", statusResponse.statusCode());
             }
         }
         
@@ -332,8 +300,7 @@ public class FalAPI {
             throw new IOException("3D generation request timed out after " + maxAttempts + " attempts");
         }
         
-        // Step 3: Get the result using the response_url from submit
-        LOGGER.info("Fetching 3D model result from response URL...");
+        // Step 3: Get the result
         
         HttpRequest resultRequest = HttpRequest.newBuilder()
                 .uri(URI.create(responseUrl))
@@ -348,7 +315,6 @@ public class FalAPI {
             throw new IOException("Failed to get 3D result from fal");
         }
         
-        LOGGER.info("Got 3D result, parsing...");
         JsonObject resultJson = GSON.fromJson(resultResponse.body(), JsonObject.class);
         String glbUrl = resultJson.getAsJsonObject("model_glb")
                 .get("url").getAsString();
@@ -362,12 +328,9 @@ public class FalAPI {
                 if (firstTexture.has("base_color")) {
                     textureUrl = firstTexture.getAsJsonObject("base_color")
                             .get("url").getAsString();
-                    LOGGER.info("Found texture URL: {}", textureUrl);
                 }
             }
         }
-        
-        LOGGER.info("Downloading GLB model from: {}", glbUrl);
         
         // Step 4: Download the GLB file
         byte[] glbData = downloadFile(glbUrl);
@@ -412,7 +375,6 @@ public class FalAPI {
             throw new IOException("Failed to download file from: " + fileUrl);
         }
         
-        LOGGER.info("Downloaded file: {} bytes", response.body().length);
         return response.body();
     }
 
@@ -429,7 +391,6 @@ public class FalAPI {
     public String generateImageWithZImage(String prompt) throws IOException, InterruptedException {
         // Augment prompt for 3D-friendly image generation
         String augmentedPrompt = prompt + " image with plain white background, view from diagonally above";
-        LOGGER.info("Starting Z-Image generation with prompt: {}", augmentedPrompt);
         
         // Build request body
         JsonObject requestBody = new JsonObject();
@@ -441,7 +402,6 @@ public class FalAPI {
         requestBody.addProperty("output_format", "png");
         
         String requestBodyJson = GSON.toJson(requestBody);
-        LOGGER.info("Submitting Z-Image request to fal queue...");
         
         HttpRequest submitRequest = HttpRequest.newBuilder()
                 .uri(URI.create(FAL_ZIMAGE_QUEUE_SUBMIT))
@@ -461,8 +421,6 @@ public class FalAPI {
         String requestId = submitJson.get("request_id").getAsString();
         String responseUrl = submitJson.get("response_url").getAsString();
         String statusUrl = submitJson.get("status_url").getAsString();
-        
-        LOGGER.info("Z-Image request submitted with ID: {}", requestId);
         
         // Poll for completion (Z-Image is fast, ~1 second)
         boolean completed = false;
@@ -485,8 +443,6 @@ public class FalAPI {
                 JsonObject statusJson = GSON.fromJson(statusResponse.body(), JsonObject.class);
                 String status = statusJson.get("status").getAsString();
                 
-                LOGGER.info("Z-Image status check {}/{}: {}", attempts, maxAttempts, status);
-                
                 if ("COMPLETED".equals(status)) {
                     completed = true;
                 } else if ("FAILED".equals(status)) {
@@ -500,8 +456,6 @@ public class FalAPI {
         }
         
         // Get the result
-        LOGGER.info("Fetching Z-Image result...");
-        
         HttpRequest resultRequest = HttpRequest.newBuilder()
                 .uri(URI.create(responseUrl))
                 .header("Authorization", "Key " + apiKey)
@@ -520,7 +474,6 @@ public class FalAPI {
                 .get(0).getAsJsonObject()
                 .get("url").getAsString();
         
-        LOGGER.info("Z-Image generated successfully: {}", imageUrl);
         return imageUrl;
     }
 
@@ -533,10 +486,6 @@ public class FalAPI {
      * @throws InterruptedException If the thread is interrupted during polling
      */
     public ModelResult generate3DWithSam3(String imageUrl, String prompt) throws IOException, InterruptedException {
-        LOGGER.info("Starting SAM-3 image-to-3D conversion...");
-        LOGGER.info("Source image: {}", imageUrl);
-        LOGGER.info("Object prompt: {}", prompt);
-        
         // Build request body
         JsonObject requestBody = new JsonObject();
         requestBody.addProperty("image_url", imageUrl);
@@ -545,7 +494,6 @@ public class FalAPI {
         requestBody.add("box_prompts", new JsonArray());
         
         String requestBodyJson = GSON.toJson(requestBody);
-        LOGGER.info("Submitting SAM-3 request to fal queue...");
         
         HttpRequest submitRequest = HttpRequest.newBuilder()
                 .uri(URI.create(FAL_SAM3_QUEUE_SUBMIT))
@@ -565,8 +513,6 @@ public class FalAPI {
         String requestId = submitJson.get("request_id").getAsString();
         String responseUrl = submitJson.get("response_url").getAsString();
         String statusUrl = submitJson.get("status_url").getAsString();
-        
-        LOGGER.info("SAM-3 request submitted with ID: {}", requestId);
         
         // Poll for completion (SAM-3 takes ~30-60 seconds)
         boolean completed = false;
@@ -589,8 +535,6 @@ public class FalAPI {
                 JsonObject statusJson = GSON.fromJson(statusResponse.body(), JsonObject.class);
                 String status = statusJson.get("status").getAsString();
                 
-                LOGGER.info("SAM-3 status check {}/{}: {}", attempts, maxAttempts, status);
-                
                 if ("COMPLETED".equals(status)) {
                     completed = true;
                 } else if ("FAILED".equals(status)) {
@@ -604,8 +548,6 @@ public class FalAPI {
         }
         
         // Get the result
-        LOGGER.info("Fetching SAM-3 result...");
-        
         HttpRequest resultRequest = HttpRequest.newBuilder()
                 .uri(URI.create(responseUrl))
                 .header("Authorization", "Key " + apiKey)
@@ -628,9 +570,6 @@ public class FalAPI {
         String glbUrl = resultJson.getAsJsonObject("model_glb")
                 .get("url").getAsString();
         
-        LOGGER.info("SAM-3 GLB URL: {}", glbUrl);
-        LOGGER.info("Downloading GLB model...");
-        
         // Download the GLB file
         byte[] glbData = downloadFile(glbUrl);
         
@@ -647,30 +586,24 @@ public class FalAPI {
      * @throws InterruptedException If the thread is interrupted during polling
      */
     public ModelResult generateModelFast(String prompt) throws IOException, InterruptedException {
-        LOGGER.info("=== Starting FAST 3D generation (Z-Image + SAM-3D) ===");
-        LOGGER.info("Prompt: {}", prompt);
-        
         // Step 1: Generate 2D image with Z-Image Turbo
-        LOGGER.info("Step 1/2: Generating 2D image with Z-Image Turbo...");
         String imageUrl = generateImageWithZImage(prompt);
         
         // Step 2: Convert image to 3D with SAM-3D
         // If segmentation fails with the original prompt, retry with generic "figure"
-        LOGGER.info("Step 2/2: Converting to 3D with SAM-3D...");
         ModelResult result;
         try {
             result = generate3DWithSam3(imageUrl, prompt);
         } catch (IOException e) {
             // Check if this is a segmentation failure (no masks found)
             if (e.getMessage() != null && e.getMessage().contains("no masks")) {
-                LOGGER.warn("SAM-3D segmentation failed with prompt '{}', retrying with 'figure'...", prompt);
+                LOGGER.warn("SAM-3D segmentation failed, retrying with generic prompt...");
                 result = generate3DWithSam3(imageUrl, "figure");
             } else {
                 throw e; // Re-throw other errors
             }
         }
         
-        LOGGER.info("=== FAST 3D generation complete! ===");
         return result;
     }
 }

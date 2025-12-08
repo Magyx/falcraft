@@ -80,8 +80,6 @@ public class GenerateCommand {
         // Run the generation process asynchronously to avoid blocking the game thread
         new Thread(() -> {
             try {
-                LOGGER.info("Starting 3D model generation process...");
-                
                 // Step 1: Call fal API to generate 3D model
                 Minecraft.getInstance().execute(() -> 
                     source.sendFeedback(Component.literal("§e[fal] Generating 3D model with AI...")));
@@ -89,7 +87,6 @@ public class GenerateCommand {
                 FalAPI falApi = new FalAPI();
                 FalAPI.ModelResult modelResult = falApi.generateModel(prompt);
                 
-                LOGGER.info("Received GLB model from fal API ({} bytes)", modelResult.glbData().length);
                 Minecraft.getInstance().execute(() ->
                     source.sendFeedback(Component.literal("§e[fal] Model generated! Processing...")));
                 
@@ -102,21 +99,9 @@ public class GenerateCommand {
                     byte[] embeddedTexture = GLBParser.extractEmbeddedTexture(modelResult.glbData());
                     if (embeddedTexture != null) {
                         textureSampler = new TextureSampler(embeddedTexture);
-                        LOGGER.info("Loaded embedded texture from GLB: {} bytes", embeddedTexture.length);
-                        
-                        // DEBUG: Save embedded texture to disk for inspection
-                        try {
-                            Path debugPath = Paths.get("debug_texture_embedded.jpg");
-                            Files.write(debugPath, embeddedTexture);
-                            LOGGER.info("DEBUG: Saved embedded texture to: {}", debugPath.toAbsolutePath());
-                        } catch (Exception ex) {
-                            LOGGER.warn("Could not save debug texture: {}", ex.getMessage());
-                        }
-                        
                         Minecraft.getInstance().execute(() ->
                             source.sendFeedback(Component.literal("§e[fal] Embedded texture extracted!")));
                     } else {
-                        LOGGER.warn("No embedded texture found in GLB");
                         Minecraft.getInstance().execute(() ->
                             source.sendFeedback(Component.literal("§6[fal] No embedded texture, will use vertex colors")));
                     }
@@ -126,26 +111,11 @@ public class GenerateCommand {
                         source.sendFeedback(Component.literal("§6[fal] Could not extract texture")));
                 }
                 
-                // DEBUG: Also download and save external texture for comparison
-                if (modelResult.textureUrl() != null) {
-                    try {
-                        LOGGER.info("DEBUG: Downloading external texture from texture_urls for comparison...");
-                        byte[] externalTexture = falApi.downloadFile(modelResult.textureUrl());
-                        Path externalPath = Paths.get("debug_texture_external.png");
-                        Files.write(externalPath, externalTexture);
-                        LOGGER.info("DEBUG: Saved external texture to: {}", externalPath.toAbsolutePath());
-                    } catch (Exception ex) {
-                        LOGGER.warn("Could not save external debug texture: {}", ex.getMessage());
-                    }
-                }
-                
                 // Step 3: Parse GLB file with texture sampling
                 Minecraft.getInstance().execute(() ->
                     source.sendFeedback(Component.literal("§e[fal] Parsing 3D model...")));
                 
                 GLBParser.MeshData meshData = GLBParser.parse(modelResult.glbData(), textureSampler);
-                LOGGER.info("Parsed GLB: {} vertices, {} indices", 
-                        meshData.vertices().length / 3, meshData.indices().length);
                 
                 // Step 4: Voxelize the mesh with per-voxel texture sampling
                 final TextureSampler finalTextureSampler = textureSampler;
@@ -172,8 +142,6 @@ public class GenerateCommand {
                                 "§a[fal] ✓ §7LEGACY§a generation complete! " + voxelGrid.voxels().size() + " blocks ready."));
                         source.sendFeedback(Component.literal(
                                 "§e[fal] Right-click to place, G to rotate!"));
-                        LOGGER.info("LEGACY 3D generation completed, entering placement preview mode");
-                        
                     } catch (Exception e) {
                         String errorMsg = e.getMessage();
                         source.sendError(Component.literal("§c[fal] Error preparing placement: " + errorMsg));
@@ -236,20 +204,6 @@ public class GenerateCommand {
                     byte[] embeddedTexture = GLBParser.extractEmbeddedTexture(modelResult.glbData());
                     if (embeddedTexture != null) {
                         textureSampler = new TextureSampler(embeddedTexture);
-                        LOGGER.info("Loaded embedded texture from GLB: {} bytes", embeddedTexture.length);
-                        
-                        // DEBUG: Save texture for inspection
-                        try {
-                            Path debugPath = Paths.get("debug_texture.png");
-                            Files.write(debugPath, embeddedTexture);
-                            LOGGER.info("DEBUG: Saved texture to: {}", debugPath.toAbsolutePath());
-                        } catch (Exception ex) {
-                            LOGGER.warn("Could not save debug texture: {}", ex.getMessage());
-                        }
-                    } else {
-                        LOGGER.warn("No embedded texture found in GLB");
-                        Minecraft.getInstance().execute(() ->
-                            source.sendFeedback(Component.literal("§6[fal] No embedded texture, will use vertex colors")));
                     }
                 } catch (Exception e) {
                     LOGGER.error("Failed to extract embedded texture: {}", e.getMessage(), e);
@@ -260,8 +214,6 @@ public class GenerateCommand {
                     source.sendFeedback(Component.literal("§e[fal] [3/4] Parsing 3D model...")));
                 
                 GLBParser.MeshData meshData = GLBParser.parse(modelResult.glbData(), textureSampler);
-                LOGGER.info("Parsed GLB: {} vertices, {} indices", 
-                        meshData.vertices().length / 3, meshData.indices().length);
                 
                 // Step 4: Voxelize the mesh
                 final TextureSampler finalTextureSampler = textureSampler;
@@ -270,7 +222,6 @@ public class GenerateCommand {
                             size + "x" + size + "x" + size + ")...")));
                 
                 Voxelizer.VoxelGrid voxelGrid = Voxelizer.voxelize(meshData, size, finalTextureSampler);
-                LOGGER.info("Voxelized mesh: {} voxels", voxelGrid.voxels().size());
                 
                 if (voxelGrid.voxels().isEmpty()) {
                     Minecraft.getInstance().execute(() ->
@@ -287,8 +238,6 @@ public class GenerateCommand {
                                 "§a[fal] ✓ Generation complete! " + voxelGrid.voxels().size() + " blocks ready."));
                         source.sendFeedback(Component.literal(
                                 "§e[fal] Right-click to place, G to rotate!"));
-                        LOGGER.info("3D generation completed, entering placement preview mode");
-                        
                     } catch (Exception e) {
                         String errorMsg = e.getMessage();
                         source.sendError(Component.literal("§c[fal] Error preparing placement: " + errorMsg));

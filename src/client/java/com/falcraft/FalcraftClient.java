@@ -21,15 +21,10 @@ public class FalcraftClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        LOGGER.info("Initializing Falcraft client...");
-        
         // Register the client-side commands
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
             RemixCommand.register(dispatcher);
-            LOGGER.info("Registered /fal remix command");
-            
             GenerateCommand.register(dispatcher);
-            LOGGER.info("Registered /fal generate command");
         });
         
         // Register ghost block renderer for placement preview
@@ -40,7 +35,6 @@ public class FalcraftClient implements ClientModInitializer {
                 context.tickCounter().getGameTimeDeltaPartialTick(true)
             );
         });
-        LOGGER.info("Registered ghost block renderer");
         
         // Register client tick handler for placement confirmation and animated placement
         // This detects right-clicks anywhere, not just when targeting blocks
@@ -64,7 +58,6 @@ public class FalcraftClient implements ClientModInitializer {
                         Component.literal("§e[fal] ⚡ Building structure..."),
                         false
                     );
-                    LOGGER.info("Player confirmed placement - starting animated build");
                 }
                 wasRightClickPressed = isRightClickPressed;
                 
@@ -88,9 +81,8 @@ public class FalcraftClient implements ClientModInitializer {
                 wasRotateKeyPressed = false;
             }
         });
-        LOGGER.info("Registered placement confirmation and animated placement handler");
         
-        LOGGER.info("Falcraft client initialized!");
+        LOGGER.info("Falcraft client initialized");
     }
 }
 

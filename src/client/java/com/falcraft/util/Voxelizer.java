@@ -521,9 +521,6 @@ public class Voxelizer {
     }
     
     public static VoxelGrid voxelize(GLBParser.MeshData mesh, int resolution, TextureSampler textureSampler) {
-        LOGGER.info("Voxelizing mesh with resolution {}x{}x{} using OBJ2VOXEL triangle splitting", 
-            resolution, resolution, resolution);
-        
         float[] vertices = mesh.vertices();
         int[] indices = mesh.indices();
         float[] uvs = mesh.uvs();
@@ -532,9 +529,6 @@ public class Voxelizer {
         boolean hasTexture = textureSampler != null && hasUVs;
         int[] colors = mesh.colors();
         boolean hasColors = colors != null && colors.length > 0;
-        
-        LOGGER.info("Mode: {} (hasUVs={}, hasTexture={}, hasVertexColors={})", 
-            hasTexture ? "TEXTURE SAMPLING" : "VERTEX COLORS", hasUVs, hasTexture, hasColors);
         
         if (vertices.length == 0) {
             return new VoxelGrid(new HashMap<>(), resolution);
@@ -572,9 +566,6 @@ public class Voxelizer {
         double offsetY = -minY * scale + antiBleed / 2;
         double offsetZ = -minZ * scale + antiBleed / 2;
         
-        LOGGER.info("Bounds: ({},{},{}) to ({},{},{}), scale: {}", 
-            minX, minY, minZ, maxX, maxY, maxZ, scale);
-        
         // Build triangles
         List<TexturedTriangle> triangles = new ArrayList<>();
         for (int i = 0; i < indices.length; i += 3) {
@@ -611,8 +602,6 @@ public class Voxelizer {
             
             triangles.add(new TexturedTriangle(v0, v1, v2, t0, t1, t2, c0, c1, c2));
         }
-        
-        LOGGER.info("Processing {} triangles with triangle splitting...", triangles.size());
         
         // Voxelize each triangle
         Map<BlockPos, WeightedColor> candidates = new HashMap<>();
@@ -683,11 +672,6 @@ public class Voxelizer {
                 }
             }
             
-            // Progress logging
-            if (trianglesProcessed % 10000 == 0) {
-                LOGGER.info("Progress: {}/{} triangles, {} voxels", 
-                    trianglesProcessed, triangles.size(), candidates.size());
-            }
         }
         
         // Extract final colors
@@ -695,9 +679,6 @@ public class Voxelizer {
         for (Map.Entry<BlockPos, WeightedColor> entry : candidates.entrySet()) {
             voxels.put(entry.getKey(), entry.getValue().color);
         }
-        
-        LOGGER.info("Voxelization complete: {} voxels from {} triangles", voxels.size(), triangles.size());
-        LOGGER.info("Stats: {} voxel updates", voxelsUpdated);
         
         return new VoxelGrid(voxels, resolution);
     }

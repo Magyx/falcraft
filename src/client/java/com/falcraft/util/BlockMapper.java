@@ -158,7 +158,6 @@ public class BlockMapper {
         BLOCK_PALETTE.put(Blocks.LIGHT_BLUE_WOOL, 0x3AAFD9);
         BLOCK_PALETTE.put(Blocks.BLACK_WOOL, 0x141519);
         
-        LOGGER.info("Initialized expanded block palette with {} blocks", BLOCK_PALETTE.size());
     }
     
     /**
