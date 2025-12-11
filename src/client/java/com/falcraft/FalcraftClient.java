@@ -25,7 +25,7 @@ public class FalcraftClient implements ClientModInitializer {
         // Register the client-side commands
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
             ConfigCommand.register(dispatcher);
-            RemixCommand.register(dispatcher);
+            // RemixCommand.register(dispatcher);  // Coming in v1.1.0
             GenerateCommand.register(dispatcher);
         });
         

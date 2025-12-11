@@ -1,6 +1,6 @@
-# 🎨 falcraft - AI-Powered 3D Generation & Texture Remix for Minecraft
+# 🎨 falcraft - AI-Powered 3D Generation for Minecraft
 
-A Fabric mod for Minecraft 1.21.1 that brings AI-powered 3D model generation and texture remixing directly into your game.
+A Fabric mod for Minecraft 1.21.1 that brings AI-powered 3D model generation directly into your game.
 
 [![GitHub stars](https://img.shields.io/github/stars/blendi-remade/falcraft)](https://github.com/blendi-remade/falcraft/stargazers)
 ![Minecraft Version](https://img.shields.io/badge/Minecraft-1.21.1-brightgreen)
@@ -36,12 +36,9 @@ For UV-textured models (~7 minutes):
 /fal generate legacy <size> <prompt>
 ```
 
-### Remix Block Textures
+### Remix Block Textures *(Coming soon)*
 
-Point at any block and run:
-```
-/fal remix <prompt>
-```
+AI-powered texture remixing with undo/reset functionality - stay tuned!
 
 ## 🚀 Setup
 
