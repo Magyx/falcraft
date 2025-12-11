@@ -6,6 +6,12 @@ A Fabric mod for Minecraft 1.21.1 that brings AI-powered 3D model generation dir
 ![Minecraft Version](https://img.shields.io/badge/Minecraft-1.21.1-brightgreen)
 ![Fabric API](https://img.shields.io/badge/Fabric%20API-0.107.0-blue)
 
+## 📺 Quick Demo
+
+[![Watch the demo](https://img.youtube.com/vi/j2dOOceVniY/maxresdefault.jpg)](https://www.youtube.com/watch?v=j2dOOceVniY)
+
+**[▶️ Watch on YouTube](https://www.youtube.com/watch?v=j2dOOceVniY)** - See Falcraft in action!
+
 ## 🎮 Commands
 
 ### Generate 3D Structures
