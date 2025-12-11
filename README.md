@@ -12,6 +12,15 @@ A Fabric mod for Minecraft 1.21.1 that brings AI-powered 3D model generation dir
 
 **[▶️ Watch on YouTube](https://www.youtube.com/watch?v=j2dOOceVniY)** - See Falcraft in action!
 
+## 🚀 Quick Start
+
+1. **[⬇️ Download Falcraft](https://github.com/blendi-remade/falcraft/releases/download/v1.0.0/falcraft-1.0.0.jar)**
+2. **[⬇️ Download Fabric API](https://modrinth.com/mod/fabric-api/version/0.116.7+1.21.1)**
+3. Drop both JARs in `.minecraft/mods/`
+4. Run `/fal setkey "YOUR_KEY"` ([get key here](https://fal.ai/dashboard/keys))
+
+📖 [Full installation guide](https://github.com/blendi-remade/falcraft/releases/tag/v1.0.0) | Requires Minecraft 1.21.1 + Fabric Loader
+
 ## 🎮 Commands
 
 ### Generate 3D Structures
@@ -46,7 +55,7 @@ For UV-textured models (~7 minutes):
 
 AI-powered texture remixing with undo/reset functionality - stay tuned!
 
-## 🚀 Setup
+## ⚙️ Setup Details
 
 1. Install [Fabric Loader](https://fabricmc.net/use/) + [Fabric API](https://modrinth.com/mod/fabric-api) for MC 1.21.1
 2. Drop the mod JAR in `.minecraft/mods/`
@@ -66,6 +75,22 @@ That's it! Your key is saved to `config/falcraft/api-key.txt`.
 ```
 Shows if your API key is configured.
 
+## 💰 API Cost
+
+This mod uses [fal.ai](https://fal.ai)'s cloud APIs. You'll need to [add credits](https://fal.ai/dashboard/billing) to your account.
+
+### Cost Breakdown (Per Structure)
+
+| Step | Model | Cost |
+|------|-------|------|
+| 1. Text → Image | Z-Image Turbo | ~$0.005-0.008 |
+| 2. Image → 3D | SAM-3D Objects | $0.02 (flat) |
+| 3. Prompt fix* | OpenRouter Vision | ~$0.001 |
+
+**Total: ~$0.025-0.03 per generation** (regardless of Minecraft size)
+
+*\*Only triggered when the 3D segmentation fails on complex/abstract prompts*
+
 ## 🧠 How It Works
 
 1. **Z-Image Turbo** generates a 2D image from your prompt
@@ -78,6 +103,7 @@ Shows if your API key is configured.
 ## 🐛 Troubleshooting
 
 - **"API key not configured"** - Run `/fal setkey "YOUR_KEY"` (with quotes) or check with `/fal status`
+- **403 error** - Your fal.ai account needs credits. [Add billing here](https://fal.ai/dashboard/billing)
 - **Structure not visible** - Look where you want to place (up to 200 blocks away)
 - **Colors look off** - The 100+ block palette maps colors as close as Minecraft allows
 
