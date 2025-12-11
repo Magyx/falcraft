@@ -10,7 +10,7 @@ A Fabric mod for Minecraft 1.21.1 that brings AI-powered 3D model generation dir
 
 [![Watch the demo](https://img.youtube.com/vi/j2dOOceVniY/hqdefault.jpg)](https://www.youtube.com/watch?v=j2dOOceVniY)
 
-**[▶️ Watch on YouTube](https://www.youtube.com/watch?v=j2dOOceVniY)** - See Falcraft in action!
+**[▶️ Watch on YouTube](https://www.youtube.com/watch?v=j2dOOceVniY)** - See falcraft in action!
 
 ## 🚀 Quick Start
 
