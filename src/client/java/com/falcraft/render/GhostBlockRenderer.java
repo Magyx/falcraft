@@ -29,22 +29,39 @@ public class GhostBlockRenderer {
     /**
      * Renders ghost blocks showing the actual structure shape with colors.
      * Uses pre-computed surface voxels for performance.
+     * 
+     * Supports both:
+     * - Normal mode: pendingGrid is set after generation
+     * - Streaming mode: surfaceVoxels are updated live during diffusion
      */
     public static void render(PoseStack poseStack, MultiBufferSource bufferSource, float partialTick) {
         if (!PlacementPreview.isPlacementActive()) {
             return;
         }
         
-        Voxelizer.VoxelGrid grid = PlacementPreview.getPendingGrid();
-        if (grid == null) {
-            return;
+        // Determine grid size based on mode
+        int size;
+        Map<BlockPos, Integer> surfaceVoxels = PlacementPreview.getSurfaceVoxels();
+        
+        if (PlacementPreview.isStreaming()) {
+            // Streaming mode: use streaming grid size
+            size = PlacementPreview.getStreamingGridSize();
+            if (surfaceVoxels == null || surfaceVoxels.isEmpty()) {
+                return; // No voxels yet - wait for first update
+            }
+        } else {
+            // Normal mode: use pending grid
+            Voxelizer.VoxelGrid grid = PlacementPreview.getPendingGrid();
+            if (grid == null) {
+                return;
+            }
+            size = grid.size();
         }
         
         Minecraft minecraft = Minecraft.getInstance();
         
-        // Calculate preview origin based on player look direction
+        // Calculate preview origin (locked during streaming, dynamic after)
         BlockPos origin = PlacementPreview.calculatePreviewOrigin();
-        int size = grid.size();
         
         // Get camera position for proper rendering offset
         Vec3 cameraPos = minecraft.gameRenderer.getMainCamera().getPosition();
@@ -73,8 +90,7 @@ public class GhostBlockRenderer {
         Matrix4f matrix = poseStack.last().pose();
         Tesselator tesselator = Tesselator.getInstance();
         
-        // Render surface voxels as ghost blocks
-        Map<BlockPos, Integer> surfaceVoxels = PlacementPreview.getSurfaceVoxels();
+        // Render surface voxels as ghost blocks (already fetched above)
         if (surfaceVoxels != null && !surfaceVoxels.isEmpty()) {
             BufferBuilder ghostBuffer = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
             renderGhostBlocks(ghostBuffer, matrix, surfaceVoxels, origin, cameraPos, size);
