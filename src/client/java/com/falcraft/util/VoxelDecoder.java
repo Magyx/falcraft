@@ -156,6 +156,11 @@ public class VoxelDecoder {
             voxels.put(pos, color);
         }
         
+        // Fill gaps for larger grid sizes (when scale > 1.0, gaps appear between voxels)
+        if (gridSize > 64) {
+            fillGaps(voxels, gridSize);
+        }
+        
         return new DecodeResult(voxels, voxelCount, boundsMin, boundsMax);
     }
     
@@ -265,6 +270,139 @@ public class VoxelDecoder {
             voxels.put(pos, tempVoxels[i][3]);
         }
         
+        // Fill gaps for larger grid sizes (when scale > 1.0, gaps appear between voxels)
+        if (gridSize > 64) {
+            fillGaps(voxels, gridSize);
+        }
+        
         return new DecodeResult(voxels, voxelCount, boundsMin, boundsMax);
+    }
+    
+    /**
+     * Fills single-block gaps in the voxel grid.
+     * When scaling up from SAM-3D's native resolution (~64), gaps appear between voxels.
+     * This method fills gaps where a voxel has neighbors on opposite sides of any axis.
+     * 
+     * @param voxels The voxel map to fill (modified in place)
+     * @param gridSize The grid size for bounds checking
+     */
+    private static void fillGaps(Map<BlockPos, Integer> voxels, int gridSize) {
+        if (voxels.isEmpty()) return;
+        
+        Map<BlockPos, Integer> toAdd = new HashMap<>();
+        
+        // Find the bounds of existing voxels to limit our search
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        
+        for (BlockPos pos : voxels.keySet()) {
+            minX = Math.min(minX, pos.getX());
+            minY = Math.min(minY, pos.getY());
+            minZ = Math.min(minZ, pos.getZ());
+            maxX = Math.max(maxX, pos.getX());
+            maxY = Math.max(maxY, pos.getY());
+            maxZ = Math.max(maxZ, pos.getZ());
+        }
+        
+        // Expand bounds by 1 to catch edge gaps
+        minX = Math.max(0, minX - 1);
+        minY = Math.max(0, minY - 1);
+        minZ = Math.max(0, minZ - 1);
+        maxX = Math.min(gridSize - 1, maxX + 1);
+        maxY = Math.min(gridSize - 1, maxY + 1);
+        maxZ = Math.min(gridSize - 1, maxZ + 1);
+        
+        // Multiple passes to fill larger gaps (up to 2 blocks wide)
+        int totalAdded = 0;
+        int passCount = 0;
+        
+        for (int pass = 0; pass < 2; pass++) {
+            toAdd.clear();
+            passCount++;
+            
+            // Check each position in the bounding box
+            for (int x = minX; x <= maxX; x++) {
+                for (int y = minY; y <= maxY; y++) {
+                    for (int z = minZ; z <= maxZ; z++) {
+                        BlockPos pos = new BlockPos(x, y, z);
+                        
+                        // Skip if already filled
+                        if (voxels.containsKey(pos)) continue;
+                        
+                        // Check for neighbors on opposite sides of each axis
+                        Integer colorX = getAxisNeighborColor(voxels, pos, 1, 0, 0);
+                        Integer colorY = getAxisNeighborColor(voxels, pos, 0, 1, 0);
+                        Integer colorZ = getAxisNeighborColor(voxels, pos, 0, 0, 1);
+                        
+                        // Fill if we have neighbors on opposite sides of any axis
+                        Integer fillColor = null;
+                        if (colorX != null) {
+                            fillColor = colorX;
+                        } else if (colorY != null) {
+                            fillColor = colorY;
+                        } else if (colorZ != null) {
+                            fillColor = colorZ;
+                        }
+                        
+                        if (fillColor != null) {
+                            toAdd.put(pos, fillColor);
+                        }
+                    }
+                }
+            }
+            
+            // Apply additions
+            voxels.putAll(toAdd);
+            totalAdded += toAdd.size();
+            
+            if (toAdd.isEmpty()) break; // No more gaps to fill
+        }
+        
+        if (totalAdded > 0) {
+            LOGGER.debug("Gap-fill added {} voxels over {} passes", totalAdded, passCount);
+        }
+    }
+    
+    /**
+     * Checks if a position has voxels on opposite sides along an axis.
+     * Returns the averaged color of the neighbors, or null if no opposite neighbors exist.
+     */
+    private static Integer getAxisNeighborColor(Map<BlockPos, Integer> voxels, BlockPos pos, 
+            int dx, int dy, int dz) {
+        // Check up to 2 blocks in each direction (to bridge larger gaps)
+        Integer negColor = null;
+        Integer posColor = null;
+        
+        for (int dist = 1; dist <= 2; dist++) {
+            BlockPos neg = pos.offset(-dx * dist, -dy * dist, -dz * dist);
+            BlockPos posi = pos.offset(dx * dist, dy * dist, dz * dist);
+            
+            if (negColor == null && voxels.containsKey(neg)) {
+                negColor = voxels.get(neg);
+            }
+            if (posColor == null && voxels.containsKey(posi)) {
+                posColor = voxels.get(posi);
+            }
+        }
+        
+        // Need neighbors on both sides
+        if (negColor == null || posColor == null) {
+            return null;
+        }
+        
+        // Average the colors
+        int r1 = (negColor >> 16) & 0xFF;
+        int g1 = (negColor >> 8) & 0xFF;
+        int b1 = negColor & 0xFF;
+        
+        int r2 = (posColor >> 16) & 0xFF;
+        int g2 = (posColor >> 8) & 0xFF;
+        int b2 = posColor & 0xFF;
+        
+        int r = (r1 + r2) / 2;
+        int g = (g1 + g2) / 2;
+        int b = (b1 + b2) / 2;
+        
+        return (r << 16) | (g << 8) | b;
     }
 }

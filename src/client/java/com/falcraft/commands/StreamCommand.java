@@ -49,13 +49,15 @@ public class StreamCommand {
         builder.suggest(64, Component.literal("Large"));
         builder.suggest(80, Component.literal("Extra Large"));
         builder.suggest(96, Component.literal("Huge"));
+        builder.suggest(112, Component.literal("Massive"));
+        builder.suggest(128, Component.literal("Maximum"));
         return builder.buildFuture();
     };
     
     public static void register(CommandDispatcher<FabricClientCommandSource> dispatcher) {
         dispatcher.register(literal("fal")
                 .then(literal("stream")
-                        .then(argument("size", IntegerArgumentType.integer(16, 96))
+                        .then(argument("size", IntegerArgumentType.integer(16, 128))
                                 .suggests(SIZE_SUGGESTIONS)
                                 .then(argument("prompt", StringArgumentType.greedyString())
                                         .executes(StreamCommand::execute)))
