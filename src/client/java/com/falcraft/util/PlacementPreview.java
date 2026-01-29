@@ -42,6 +42,11 @@ public class PlacementPreview {
     private static Map<BlockPos, Integer> noiseVoxels = null; // Random noise for "emerging from chaos" effect
     private static final Random NOISE_RANDOM = new Random();
     
+    // Noise animation state - makes the noise "alive" and swirling from the start
+    private static int noiseAnimationTick = 0;
+    private static Map<BlockPos, float[]> noisePositions = null; // Actual float positions for smooth movement
+    private static Map<BlockPos, float[]> noiseVelocities = null; // [vx, vy, vz] per noise voxel
+    
     // Animated placement state
     private static boolean isAnimatingPlacement = false;
     private static List<List<Map.Entry<BlockPos, Integer>>> layersByY = null;
@@ -99,54 +104,234 @@ public class PlacementPreview {
         noiseVoxels = generateNoiseVoxels(gridSize);
         surfaceVoxels = new HashMap<>(noiseVoxels); // Start with noise visible
         
+        // Initialize noise animation - make it ALIVE from the start!
+        noiseAnimationTick = 0;
+        initializeNoiseAnimation();
+        
         LOGGER.info("Started streaming preview mode with grid size {}, {} noise voxels, locked origin at {}", 
             gridSize, noiseVoxels.size(), streamingLockedOrigin);
     }
     
     /**
+     * Initializes noise animation state.
+     * With the new "stable emergence" approach, we just need to track the noise - no movement.
+     */
+    private static void initializeNoiseAnimation() {
+        // No complex initialization needed anymore
+        // The noise is static, creating a stable cloud for the structure to emerge through
+        noisePositions = null;
+        noiseVelocities = null;
+    }
+    
+    /**
+     * Updates noise display each tick.
+     * 
+     * NEW APPROACH - "Stable Emergence":
+     * - Noise is STATIC (no chaotic movement)
+     * - Gentle floating/pulsing effect only
+     * - Structure emerges THROUGH the noise cloud
+     * - Clean, deterministic fade-out
+     */
+    public static void tickNoiseAnimation() {
+        if (!isStreaming || noiseVoxels == null || noiseVoxels.isEmpty()) return;
+        
+        noiseAnimationTick++;
+        
+        // Update surface voxels - this is where the magic happens
+        if (streamingVoxels == null || streamingVoxels.isEmpty()) {
+            // No real data yet - show static noise cloud
+            // Add subtle "breathing" effect by occasionally toggling a few voxels
+            if (noiseAnimationTick % 10 == 0) {
+                // Very subtle shimmer - just change colors slightly
+                for (Map.Entry<BlockPos, Integer> entry : noiseVoxels.entrySet()) {
+                    // 5% chance to slightly shift color for shimmer effect
+                    if (NOISE_RANDOM.nextFloat() < 0.05f) {
+                        int newColor = MIXED_BLOCK_PALETTE[NOISE_RANDOM.nextInt(MIXED_BLOCK_PALETTE.length)];
+                        noiseVoxels.put(entry.getKey(), newColor);
+                    }
+                }
+            }
+            surfaceVoxels = new HashMap<>(noiseVoxels);
+        } else {
+            // Real data arrived - blend noise with structure (handled by blendNoiseWithVoxels)
+            surfaceVoxels = blendNoiseWithVoxels(streamingVoxels, streamingStage, streamingProgress);
+        }
+    }
+    
+    // Comprehensive block palette - ~65% natural/neutral, ~35% colorful accents
+    // Creates a realistic "pile of Minecraft blocks" effect
+    private static final int[] MIXED_BLOCK_PALETTE = {
+        // ===== STONE VARIANTS (most common - the backbone) =====
+        0x808080, // Stone
+        0x808080, // Stone (duplicate for higher frequency)
+        0x7F7F7F, // Cobblestone
+        0x7F7F7F, // Cobblestone (duplicate)
+        0x7A7A7A, // Stone bricks
+        0x4F4F51, // Deepslate
+        0x555555, // Cobbled deepslate
+        0x434343, // Deepslate bricks
+        0x353538, // Deepslate tiles
+        0x6C6C66, // Tuff
+        0x878787, // Andesite
+        0x848484, // Polished andesite
+        0xE4E4E4, // Diorite
+        0x9A6E53, // Granite
+        0xA0A0A0, // Smooth stone
+        0x2A2333, // Blackstone
+        0x36313D, // Polished blackstone
+        
+        // ===== WOOD PLANKS (lots of brown tones) =====
+        0xB18962, // Oak
+        0xB18962, // Oak (duplicate)
+        0x73563A, // Spruce
+        0x73563A, // Spruce (duplicate)
+        0xD2BC7C, // Birch
+        0x44331C, // Dark oak
+        0xB88856, // Jungle
+        0xB05E3C, // Acacia
+        0x773636, // Mangrove
+        0xE4B4A8, // Cherry
+        0x6C3A4A, // Crimson
+        0x2B6D64, // Warped
+        
+        // ===== NATURAL/ORGANIC =====
+        0x8B5D3B, // Dirt-ish
+        0xE3DBB0, // Sandstone
+        0xBF6330, // Red sandstone
+        0x4F6633, // Moss
+        0x8B6B4D, // Mud bricks
+        0x8E7259, // Packed mud
+        0x8F5D4B, // Bricks
+        0xDBDCA6, // End stone
+        0x6D3636, // Netherrack
+        0x2C151A, // Nether bricks
+        
+        // ===== TERRACOTTA (muted, earthy colors) =====
+        0xD1B1A1, // White terracotta
+        0x876B62, // Light gray terracotta
+        0x392A23, // Gray terracotta
+        0xA05325, // Orange terracotta
+        0x4D3224, // Brown terracotta
+        0x8F3D2E, // Red terracotta
+        0xBA8523, // Yellow terracotta
+        0x575B5B, // Cyan terracotta
+        0x4A3B5B, // Blue terracotta
+        0x4C532A, // Green terracotta
+        0x764556, // Purple terracotta
+        
+        // ===== CONCRETE (some vibrant accents) =====
+        0xF9FFFE, // White concrete
+        0x7D7D73, // Light gray concrete
+        0x36393D, // Gray concrete
+        0x080A0F, // Black concrete
+        0x5C3A24, // Brown concrete
+        0x8E2121, // Red concrete
+        0xE06101, // Orange concrete
+        0xF1AF15, // Yellow concrete
+        0x5EA818, // Lime concrete
+        0x157788, // Cyan concrete
+        0x2389C6, // Light blue concrete
+        0x2C2E8F, // Blue concrete
+        0x64209C, // Purple concrete
+        
+        // ===== MINERAL BLOCKS (iconic, sparkly) =====
+        0xAA0F01, // Redstone block!
+        0x1E4B8C, // Lapis block
+        0xF9D71C, // Gold block
+        0xD8D8D8, // Iron block
+        0x62E2DD, // Diamond block
+        0x52D869, // Emerald block
+        0xFFBC5E, // Glowstone
+        0x1A1919, // Coal block
+        
+        // ===== SPECIAL BLOCKS (unique colors) =====
+        0x63A293, // Prismarine
+        0x395A4E, // Dark prismarine
+        0x8B6AA6, // Amethyst
+        0xA87AA4, // Purpur
+        0xE8E5DD, // Quartz
+        0xE3DCC6, // Bone block
+        0xC06A4D, // Copper
+        0x53A384, // Oxidized copper
+        
+        // ===== WOOL (soft accents - fewer than before) =====
+        0xE9ECEC, // White wool
+        0x3E4447, // Gray wool
+        0x8E8E86, // Light gray wool
+        0x724728, // Brown wool
+        0xA12722, // Red wool
+        0x546D1B, // Green wool
+    };
+    
+    // "Magical" block palette for geometry phase - prismarine, ice, crystal-like
+    private static final int[] MAGICAL_BLOCK_PALETTE = {
+        0x63A293, // Prismarine
+        0x5BA496, // Prismarine bricks
+        0x395A4E, // Dark prismarine
+        0xACDBC5, // Sea lantern
+        0x167879, // Warped wart block
+        0x2B6D64, // Warped planks
+        0x8B6AA6, // Amethyst
+        0xA87AA4, // Purpur
+        0x7FCCF5, // Light blue ice-like
+        0x9CDDF5, // Sky blue crystalline
+        0x4ACFCF, // Bright cyan
+        0x2DD4BF, // Teal
+    };
+    
+    /**
      * Generates dense noise voxels to create a "cloud" effect.
      * Uses gaussian distribution so noise is denser in the center.
-     * This creates the initial "chaos" that will condense into the structure.
+     * Uses ACTUAL Minecraft block colors for a more "real" initial chaos.
      */
     private static Map<BlockPos, Integer> generateNoiseVoxels(int gridSize) {
         Map<BlockPos, Integer> noise = new HashMap<>();
         
-        // Generate DENSE noise - aim for ~25-35% fill of the bounding box
-        // This creates a proper "cloud" effect rather than sparse floating cubes
+        // Target ~35% fill with subtle organic variation (not too cubic, not too circular)
         int totalVoxels = gridSize * gridSize * gridSize;
-        int noiseCount = (int) (totalVoxels * 0.30); // 30% fill
-        noiseCount = Math.min(noiseCount, 15000); // Cap for performance
-        noiseCount = Math.max(noiseCount, 2000);  // Minimum for visual effect
-        
-        // Cyan-ish colors for the magical noise effect
-        int[] noiseColors = {
-            0x00FFFF, // Cyan
-            0x40E0D0, // Turquoise
-            0x7FFFD4, // Aquamarine
-            0x00CED1, // Dark turquoise
-            0x48D1CC, // Medium turquoise
-            0x20B2AA, // Light sea green
-            0x5F9EA0, // Cadet blue
-            0x00BFFF, // Deep sky blue
-            0x87CEEB, // Sky blue
-        };
+        int targetCount = (int) (totalVoxels * 0.35);
+        targetCount = Math.min(targetCount, 18000); // Cap for performance
+        targetCount = Math.max(targetCount, 2500);  // Minimum for visual effect
         
         float center = gridSize / 2.0f;
-        float stdDev = gridSize / 3.0f; // Gaussian spread
+        float stdDev = gridSize / 2.8f; // Moderate spread
         
-        for (int i = 0; i < noiseCount; i++) {
-            // Use gaussian distribution centered on the middle
-            // This makes noise denser in the center where structure will form
-            int x = (int) Math.round(center + NOISE_RANDOM.nextGaussian() * stdDev);
-            int y = (int) Math.round(center + NOISE_RANDOM.nextGaussian() * stdDev);
-            int z = (int) Math.round(center + NOISE_RANDOM.nextGaussian() * stdDev);
+        // Small margin to soften hard cube edges
+        int margin = Math.max(1, gridSize / 16);
+        int minBound = margin;
+        int maxBound = gridSize - margin - 1;
+        
+        int attempts = 0;
+        int maxAttempts = targetCount * 3;
+        
+        while (noise.size() < targetCount && attempts < maxAttempts) {
+            attempts++;
             
-            // Clamp to grid bounds
-            x = Math.max(0, Math.min(gridSize - 1, x));
-            y = Math.max(0, Math.min(gridSize - 1, y));
-            z = Math.max(0, Math.min(gridSize - 1, z));
+            // Gaussian distribution - denser in center
+            float gx = (float) (center + NOISE_RANDOM.nextGaussian() * stdDev);
+            float gy = (float) (center + NOISE_RANDOM.nextGaussian() * stdDev);
+            float gz = (float) (center + NOISE_RANDOM.nextGaussian() * stdDev);
             
-            int color = noiseColors[NOISE_RANDOM.nextInt(noiseColors.length)];
+            int x = Math.round(gx);
+            int y = Math.round(gy);
+            int z = Math.round(gz);
+            
+            // Reject positions outside bounds (softer than clamping)
+            if (x < minBound || x > maxBound || 
+                y < minBound || y > maxBound || 
+                z < minBound || z > maxBound) {
+                continue;
+            }
+            
+            // Add irregular "holes" using position-based hash - breaks uniformity
+            int hash = (x * 73856093) ^ (y * 19349663) ^ (z * 83492791);
+            float holeProbability = 0.12f; // 12% holes for organic feel
+            if ((hash & 0xFF) < (int)(holeProbability * 256)) {
+                continue;
+            }
+            
+            // Use actual Minecraft block colors
+            int color = MIXED_BLOCK_PALETTE[NOISE_RANDOM.nextInt(MIXED_BLOCK_PALETTE.length)];
             noise.put(new BlockPos(x, y, z), color);
         }
         
@@ -238,102 +423,114 @@ public class PlacementPreview {
     }
     
     /**
-     * Blends noise voxels with real voxels using proximity-based condensation.
-     * Creates a "noise condensing into structure" visual effect.
+     * Blends noise voxels with real voxels for clean "emergence from cloud" effect.
      * 
-     * Key behaviors:
-     * - Noise near real voxels stays longer (being "absorbed")
-     * - Noise far from structure fades out quickly
-     * - Creates visual of chaos condensing into order
+     * NEW APPROACH - Smooth, deterministic blending:
+     * 1. Real voxels always show (they're the structure!)
+     * 2. Noise voxels fade based on DISTANCE to structure + PROGRESS
+     * 3. No random flickering - deterministic based on position
+     * 4. Noise stays visible longer for cleaner emergence
      */
     private static Map<BlockPos, Integer> blendNoiseWithVoxels(Map<BlockPos, Integer> realVoxels, 
             String stage, float progress) {
         Map<BlockPos, Integer> blended = new HashMap<>();
         
-        // Add real voxels with stage-appropriate coloring
         boolean isGeometry = "geometry".equals(stage);
         
+        // Progress within each phase
+        float geometryProgress = isGeometry ? Math.min(1.0f, progress * 2.0f) : 1.0f;
+        float appearanceProgress = isGeometry ? 0.0f : Math.min(1.0f, (progress - 0.5f) * 2.0f);
+        
+        // Calculate structure bounds for distance calculations
+        BlockPos centroid = realVoxels.isEmpty() ? 
+            new BlockPos(streamingGridSize/2, streamingGridSize/2, streamingGridSize/2) : 
+            calculateCentroid(realVoxels.keySet());
+        
+        // FIRST: Add noise voxels - they CONVERGE towards the structure
+        // FAR noise disappears first, CLOSE noise stays longer (shrinking cloud effect)
+        // All noise gone by appearance phase (progress ~0.5)
+        if (noiseVoxels != null && !noiseVoxels.isEmpty()) {
+            
+            // Noise fully gone by start of appearance phase (50%)
+            float fadeEnd = 0.50f;
+            float fadeFactor = Math.min(1f, progress / fadeEnd);
+            
+            for (Map.Entry<BlockPos, Integer> entry : noiseVoxels.entrySet()) {
+                BlockPos noisePos = entry.getKey();
+                
+                // Calculate distance to nearest real voxel
+                float distToStructure;
+                if (realVoxels.size() < 50) {
+                    distToStructure = (float) Math.sqrt(noisePos.distSqr(centroid));
+                } else {
+                    // Sample nearby real voxels for speed
+                    distToStructure = Float.MAX_VALUE;
+                    int checked = 0;
+                    for (BlockPos realPos : realVoxels.keySet()) {
+                        float d = (float) Math.sqrt(noisePos.distSqr(realPos));
+                        if (d < distToStructure) distToStructure = d;
+                        if (d < 2 || ++checked > 20) break;
+                    }
+                }
+                
+                // CONVERGING logic: FAR noise fades FIRST, CLOSE noise stays LONGER
+                // This creates the "shrinking cloud" effect towards the structure
+                float maxDist = streamingGridSize * 0.5f;
+                float normalizedDist = Math.min(1f, distToStructure / maxDist);
+                
+                // Far (dist ~1) = LOW threshold = fades early
+                // Close (dist ~0) = HIGH threshold = survives longer
+                float survivalThreshold = (1f - normalizedDist) * 0.7f + 0.2f; // Range: 0.2 (far) to 0.9 (close)
+                
+                if (fadeFactor < survivalThreshold) {
+                    int noiseColor = entry.getValue();
+                    
+                    // Noise near structure transforms to magical colors (being absorbed)
+                    if (distToStructure < 6 && progress > 0.05f) {
+                        float transformAmount = Math.min(1f, progress * 2f);
+                        transformAmount *= (1f - distToStructure / 6f); // Closer = more transformed
+                        int magicalColor = MAGICAL_BLOCK_PALETTE[Math.abs(noiseColor) % MAGICAL_BLOCK_PALETTE.length];
+                        noiseColor = blendColors(noiseColor, magicalColor, transformAmount);
+                    }
+                    
+                    blended.put(noisePos, noiseColor);
+                }
+            }
+        }
+        
+        // SECOND: Add real voxels ON TOP (they override noise at same position)
+        // Real voxels are the actual structure emerging through the noise
         for (Map.Entry<BlockPos, Integer> entry : realVoxels.entrySet()) {
-            int color = entry.getValue();
+            int originalColor = entry.getValue();
+            int color;
             
             if (isGeometry) {
-                // Geometry phase: Apply cyan tint to all voxels
-                color = applyCyanTint(color, 0.8f); // Strong cyan tint
+                // Geometry phase: Show as magical/crystalline blocks
+                color = MAGICAL_BLOCK_PALETTE[Math.abs(originalColor) % MAGICAL_BLOCK_PALETTE.length];
             } else {
-                // Appearance phase: Blend from cyan to real color based on progress
-                // Progress 0.5 = start of appearance, 1.0 = end
-                float appearanceProgress = Math.min(1.0f, (progress - 0.5f) * 2.0f);
-                if (appearanceProgress < 1.0f) {
-                    int cyanColor = applyCyanTint(color, 1.0f - appearanceProgress);
-                    color = blendColors(cyanColor, color, appearanceProgress);
-                }
+                // Appearance phase: Blend from magical to final block color
+                int magicalColor = MAGICAL_BLOCK_PALETTE[Math.abs(originalColor) % MAGICAL_BLOCK_PALETTE.length];
+                int mappedColor = getBlockMappedColor(originalColor);
+                color = blendColors(magicalColor, mappedColor, appearanceProgress);
             }
             
             blended.put(entry.getKey(), color);
         }
         
-        // Add noise voxels with PROXIMITY-BASED condensation
-        // Noise near real voxels stays, noise far away fades quickly
-        if (noiseVoxels != null && !noiseVoxels.isEmpty() && progress < 0.85f) {
-            
-            // Calculate centroid of real voxels (where structure is forming)
-            BlockPos centroid = calculateCentroid(realVoxels.keySet());
-            
-            for (Map.Entry<BlockPos, Integer> entry : noiseVoxels.entrySet()) {
-                BlockPos noisePos = entry.getKey();
-                
-                // Skip if already covered by a real voxel
-                if (blended.containsKey(noisePos)) continue;
-                
-                // Calculate distance to nearest real voxel (approximated by centroid for performance)
-                // and distance to any nearby real voxels
-                float minDistToReal = Float.MAX_VALUE;
-                if (!realVoxels.isEmpty()) {
-                    // Check distance to centroid first (fast approximation)
-                    float distToCentroid = (float) Math.sqrt(noisePos.distSqr(centroid));
-                    minDistToReal = distToCentroid;
-                    
-                    // For voxels close to centroid, check actual nearest neighbors
-                    if (distToCentroid < streamingGridSize * 0.5f) {
-                        for (BlockPos realPos : realVoxels.keySet()) {
-                            float dist = (float) Math.sqrt(noisePos.distSqr(realPos));
-                            if (dist < minDistToReal) {
-                                minDistToReal = dist;
-                                if (dist < 3) break; // Close enough, no need to check more
-                            }
-                        }
-                    }
-                }
-                
-                // Proximity-based survival probability
-                // - Very close (0-4 blocks): High chance to stay (condensing effect)
-                // - Medium (5-10 blocks): Medium chance, decreases with progress
-                // - Far (11+ blocks): Low chance, fades quickly
-                float survivalChance;
-                
-                if (minDistToReal < 4) {
-                    // Close to structure - stays longer (being absorbed)
-                    survivalChance = 0.95f - (progress * 0.5f);
-                } else if (minDistToReal < 10) {
-                    // Medium distance - moderate fade
-                    survivalChance = 0.7f - (progress * 1.0f);
-                } else {
-                    // Far from structure - fades quickly
-                    survivalChance = 0.4f - (progress * 1.2f);
-                }
-                
-                // Apply global progress fade on top
-                survivalChance *= (1.0f - progress * 0.8f);
-                survivalChance = Math.max(0f, Math.min(1f, survivalChance));
-                
-                // Probabilistically keep this noise voxel
-                if (NOISE_RANDOM.nextFloat() < survivalChance) {
-                    blended.put(noisePos, entry.getValue());
-                }
-            }
-        }
-        
         return blended;
+    }
+    
+    /**
+     * Gets the actual Minecraft block color that this RGB would map to.
+     * Uses BlockMapper's palette to find the closest matching block color.
+     */
+    private static int getBlockMappedColor(int rgb) {
+        // Get the BlockState that this color maps to
+        BlockState blockState = BlockMapper.getClosestBlock(rgb);
+        
+        // Get the color of that block from the mapper's palette
+        // We need to look up what color that block actually is
+        return BlockMapper.getBlockColor(blockState.getBlock());
     }
     
     /**
@@ -357,29 +554,6 @@ public class PlacementPreview {
             (int) (sumY / count),
             (int) (sumZ / count)
         );
-    }
-    
-    /**
-     * Applies a cyan tint to a color.
-     * @param color Original RGB color
-     * @param intensity Tint intensity (0.0 = no tint, 1.0 = full cyan)
-     * @return Tinted color
-     */
-    private static int applyCyanTint(int color, float intensity) {
-        int r = (color >> 16) & 0xFF;
-        int g = (color >> 8) & 0xFF;
-        int b = color & 0xFF;
-        
-        // Cyan is (0, 255, 255) - boost G and B, reduce R
-        int cyanR = 64;  // Slight red for a more magical look
-        int cyanG = 224;
-        int cyanB = 255;
-        
-        r = (int) (r * (1 - intensity) + cyanR * intensity);
-        g = (int) (g * (1 - intensity) + cyanG * intensity);
-        b = (int) (b * (1 - intensity) + cyanB * intensity);
-        
-        return (r << 16) | (g << 8) | b;
     }
     
     /**
@@ -416,9 +590,12 @@ public class PlacementPreview {
         isStreaming = false;
         streamingStage = "complete";
         
-        // Clear noise and unlock position
+        // Clear noise, animation state, and unlock position
         noiseVoxels = null;
         streamingLockedOrigin = null;
+        noiseAnimationTick = 0;
+        noisePositions = null;
+        noiseVelocities = null;
         
         LOGGER.info("Streaming complete! {} voxels ready for placement", finalVoxels.size());
     }
@@ -436,6 +613,10 @@ public class PlacementPreview {
             pendingGrid = null;
             streamingLockedOrigin = null;
             noiseVoxels = null;
+            // Clear noise animation state
+            noiseAnimationTick = 0;
+            noisePositions = null;
+            noiseVelocities = null;
         }
     }
     

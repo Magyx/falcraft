@@ -50,6 +50,11 @@ public class FalcraftClient implements ClientModInitializer {
                 PlacementPreview.tickAnimatedPlacement();
             }
             
+            // Tick noise animation during streaming - makes chaos ALIVE from the start!
+            if (PlacementPreview.isStreaming()) {
+                PlacementPreview.tickNoiseAnimation();
+            }
+            
             // Check if placement mode is active
             if (PlacementPreview.isPlacementActive()) {
                 // During streaming mode, only allow rotation and ESC to cancel

@@ -1,13 +1,18 @@
 package com.falcraft.render;
 
+import com.falcraft.util.BlockMapper;
 import com.falcraft.util.PlacementPreview;
 import com.falcraft.util.Voxelizer;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.block.BlockRenderDispatcher;
+import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
@@ -33,6 +38,8 @@ public class GhostBlockRenderer {
      * Supports both:
      * - Normal mode: pendingGrid is set after generation
      * - Streaming mode: surfaceVoxels are updated live during diffusion
+     * 
+     * During streaming, renders ACTUAL Minecraft block textures for a more immersive effect!
      */
     public static void render(PoseStack poseStack, MultiBufferSource bufferSource, float partialTick) {
         if (!PlacementPreview.isPlacementActive()) {
@@ -79,23 +86,21 @@ public class GhostBlockRenderer {
         // Setup rendering
         poseStack.pushPose();
         
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
-        // Enable depth TEST and MASK so ghost blocks render solidly and occlude the world
-        // This makes the preview look more like the actual placed structure
         RenderSystem.enableDepthTest();
         RenderSystem.depthMask(true);
         
+        // Render voxels - ALWAYS use textured blocks for best visual experience
+        // This shows actual Minecraft block textures in the preview!
+        if (surfaceVoxels != null && !surfaceVoxels.isEmpty()) {
+            renderTexturedBlocks(poseStack, bufferSource, surfaceVoxels, origin, cameraPos, size);
+        }
+        
+        // Draw bounding box and footprint outlines
+        RenderSystem.setShader(GameRenderer::getPositionColorShader);
         Matrix4f matrix = poseStack.last().pose();
         Tesselator tesselator = Tesselator.getInstance();
-        
-        // Render surface voxels as ghost blocks (already fetched above)
-        if (surfaceVoxels != null && !surfaceVoxels.isEmpty()) {
-            BufferBuilder ghostBuffer = tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-            renderGhostBlocks(ghostBuffer, matrix, surfaceVoxels, origin, cameraPos, size);
-            BufferUploader.drawWithShader(ghostBuffer.buildOrThrow());
-        }
         
         // Draw bounding box outline (subtle, since we have ghost blocks)
         BufferBuilder lineBuffer = tesselator.begin(VertexFormat.Mode.DEBUG_LINES, DefaultVertexFormat.POSITION_COLOR);
@@ -112,6 +117,44 @@ public class GhostBlockRenderer {
         RenderSystem.disableBlend();
         
         poseStack.popPose();
+    }
+    
+    /**
+     * Renders voxels as actual textured Minecraft blocks.
+     * Used during streaming for an immersive "blocks materializing" effect.
+     */
+    private static void renderTexturedBlocks(PoseStack poseStack, MultiBufferSource bufferSource,
+            Map<BlockPos, Integer> voxels, BlockPos origin, Vec3 cameraPos, int gridSize) {
+        
+        Minecraft minecraft = Minecraft.getInstance();
+        BlockRenderDispatcher blockRenderer = minecraft.getBlockRenderer();
+        
+        // Full brightness for preview blocks
+        int light = LightTexture.FULL_BRIGHT;
+        
+        for (Map.Entry<BlockPos, Integer> entry : voxels.entrySet()) {
+            BlockPos localPos = entry.getKey();
+            int rgb = entry.getValue();
+            
+            // Apply rotation
+            BlockPos rotatedPos = PlacementPreview.rotatePosition(localPos, gridSize);
+            
+            // Get actual block state from color
+            BlockState blockState = BlockMapper.getClosestBlock(rgb);
+            
+            // Calculate world position relative to camera
+            double x = origin.getX() + rotatedPos.getX() - cameraPos.x;
+            double y = origin.getY() + rotatedPos.getY() - cameraPos.y;
+            double z = origin.getZ() + rotatedPos.getZ() - cameraPos.z;
+            
+            poseStack.pushPose();
+            poseStack.translate(x, y, z);
+            
+            // Render the actual block model with textures (full size, no scaling)
+            blockRenderer.renderSingleBlock(blockState, poseStack, bufferSource, light, OverlayTexture.NO_OVERLAY);
+            
+            poseStack.popPose();
+        }
     }
     
     /**

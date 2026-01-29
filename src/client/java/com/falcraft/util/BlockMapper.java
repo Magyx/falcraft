@@ -259,6 +259,16 @@ public class BlockMapper {
     }
     
     /**
+     * Gets the RGB color associated with a block.
+     * @param block The block to get the color for
+     * @return The RGB color (0xRRGGBB), or 0x808080 (gray) if not in palette
+     */
+    public static int getBlockColor(Block block) {
+        Integer color = BLOCK_PALETTE.get(block);
+        return color != null ? color : 0x808080;
+    }
+    
+    /**
      * Clears the color cache
      */
     public static void clearCache() {

@@ -19,7 +19,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Consumer;
 
 /**
  * SSE client for the SAM-3D streaming endpoint.
@@ -249,9 +248,10 @@ public class SAM3DStreamAPI {
         
         // Parse SSE events
         Map<BlockPos, Integer> lastVoxels = null;
+        java.io.InputStream bodyStream = response.body();
         
         try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
+                new InputStreamReader(bodyStream, StandardCharsets.UTF_8))) {
             
             String line;
             StringBuilder eventData = new StringBuilder();
@@ -268,19 +268,50 @@ public class SAM3DStreamAPI {
                     
                     try {
                         JsonObject event = GSON.fromJson(jsonStr, JsonObject.class);
-                        lastVoxels = processSSEEvent(event, gridSize, callback, lastVoxels);
                         
-                        // Check for completion
+                        // Check for early exit BEFORE processing status messages
                         if (event.has("stage")) {
                             String stage = event.get("stage").getAsString();
+                            
+                            // EARLY EXIT: When final appearance step is received, we have all voxels!
+                            // Skip waiting for mesh_preview, finalizing, and GLB generation (saves ~5-10 seconds)
+                            if ("appearance".equals(stage) && event.has("step") && event.has("total_steps")) {
+                                int step = event.get("step").getAsInt();
+                                int totalSteps = event.get("total_steps").getAsInt();
+                                
+                                // Process this final voxel update first
+                                lastVoxels = processSSEEvent(event, gridSize, callback, lastVoxels);
+                                
+                                if (step == totalSteps && lastVoxels != null && !lastVoxels.isEmpty()) {
+                                    LOGGER.info("Early exit: Got final appearance step ({}/{}), {} voxels. Skipping GLB generation.",
+                                            step, totalSteps, lastVoxels.size());
+                                    callback.onComplete(lastVoxels);
+                                    // Close the stream immediately to stop receiving more events
+                                    bodyStream.close();
+                                    return; // Exit immediately
+                                }
+                                continue; // Already processed, skip to next event
+                            }
+                            
+                            // Normal processing for other stages
+                            lastVoxels = processSSEEvent(event, gridSize, callback, lastVoxels);
+                            
+                            // Check for completion or error
                             if ("complete".equals(stage) || "error".equals(stage)) {
                                 break;
                             }
+                        } else {
+                            lastVoxels = processSSEEvent(event, gridSize, callback, lastVoxels);
                         }
                     } catch (Exception e) {
                         LOGGER.warn("Failed to parse SSE event: {}", jsonStr, e);
                     }
                 }
+            }
+        } catch (IOException e) {
+            // Expected when we close the stream early
+            if (!e.getMessage().contains("closed") && !e.getMessage().contains("Stream closed")) {
+                throw e;
             }
         }
         

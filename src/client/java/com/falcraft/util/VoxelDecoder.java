@@ -85,6 +85,14 @@ public class VoxelDecoder {
         float maxRange = Math.max(Math.max(rangeX, rangeY), rangeZ);
         float scale = (gridSize - 1) / maxRange;
         
+        // First pass: decode all voxels and track bounds for centering
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        
+        // Temporary storage for positions and colors
+        int[][] tempVoxels = new int[voxelCount][4]; // [gridX, gridY, gridZ, color]
+        int validCount = 0;
+        
         for (int i = 0; i < bytes.length; i += 6) {
             // Normalized coords (0-255)
             float xNorm = (bytes[i] & 0xFF) / 255f;
@@ -96,30 +104,53 @@ public class VoxelDecoder {
             float worldY = boundsMin[1] + yNorm * rangeY;
             float worldZ = boundsMin[2] + zNorm * rangeZ;
             
-            // Convert to grid coordinates (center and scale)
+            // Convert to grid coordinates
             // SAM-3D uses Z-up, Minecraft uses Y-up
-            // SAM-3D: X right, Y forward, Z up
-            // Minecraft: X right, Y up, Z forward (south)
             int gridX = Math.round((worldX - boundsMin[0]) * scale);
             int gridY = Math.round((worldZ - boundsMin[2]) * scale); // Z -> Y (up)
             int gridZ = Math.round((worldY - boundsMin[1]) * scale); // Y -> Z (forward)
-            
-            // Clamp to grid bounds
-            gridX = Math.max(0, Math.min(gridSize - 1, gridX));
-            gridY = Math.max(0, Math.min(gridSize - 1, gridY));
-            gridZ = Math.max(0, Math.min(gridSize - 1, gridZ));
             
             // RGB colors (0-255)
             int r = bytes[i + 3] & 0xFF;
             int g = bytes[i + 4] & 0xFF;
             int b = bytes[i + 5] & 0xFF;
-            
-            // Pack color
             int color = (r << 16) | (g << 8) | b;
             
-            // Handle gray/missing colors during geometry phase
-            // If color is very dark gray (close to 128,128,128 which is the default),
-            // we keep it as-is since the appearance phase will provide real colors
+            // Track bounds
+            minX = Math.min(minX, gridX);
+            minY = Math.min(minY, gridY);
+            minZ = Math.min(minZ, gridZ);
+            maxX = Math.max(maxX, gridX);
+            maxY = Math.max(maxY, gridY);
+            maxZ = Math.max(maxZ, gridZ);
+            
+            tempVoxels[validCount][0] = gridX;
+            tempVoxels[validCount][1] = gridY;
+            tempVoxels[validCount][2] = gridZ;
+            tempVoxels[validCount][3] = color;
+            validCount++;
+        }
+        
+        // Calculate centering offset
+        int structureWidth = maxX - minX + 1;
+        int structureHeight = maxY - minY + 1;
+        int structureDepth = maxZ - minZ + 1;
+        
+        int offsetX = (gridSize - structureWidth) / 2 - minX;
+        int offsetY = (gridSize - structureHeight) / 2 - minY;
+        int offsetZ = (gridSize - structureDepth) / 2 - minZ;
+        
+        // Second pass: apply centering offset and store final positions
+        for (int i = 0; i < validCount; i++) {
+            int gridX = tempVoxels[i][0] + offsetX;
+            int gridY = tempVoxels[i][1] + offsetY;
+            int gridZ = tempVoxels[i][2] + offsetZ;
+            int color = tempVoxels[i][3];
+            
+            // Clamp to grid bounds
+            gridX = Math.max(0, Math.min(gridSize - 1, gridX));
+            gridY = Math.max(0, Math.min(gridSize - 1, gridY));
+            gridZ = Math.max(0, Math.min(gridSize - 1, gridZ));
             
             BlockPos pos = new BlockPos(gridX, gridY, gridZ);
             voxels.put(pos, color);
@@ -175,6 +206,13 @@ public class VoxelDecoder {
         // Default translucent white for geometry phase
         int defaultColor = 0xCCCCCC;
         
+        // First pass: decode and track bounds for centering
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        
+        int[][] tempVoxels = new int[voxelCount][4];
+        int validCount = 0;
+        
         for (int i = 0; i < bytes.length; i += 6) {
             float xNorm = (bytes[i] & 0xFF) / 255f;
             float yNorm = (bytes[i + 1] & 0xFF) / 255f;
@@ -184,14 +222,9 @@ public class VoxelDecoder {
             float worldY = boundsMin[1] + yNorm * rangeY;
             float worldZ = boundsMin[2] + zNorm * rangeZ;
             
-            // SAM-3D Z-up to Minecraft Y-up conversion
             int gridX = Math.round((worldX - boundsMin[0]) * scale);
             int gridY = Math.round((worldZ - boundsMin[2]) * scale);
             int gridZ = Math.round((worldY - boundsMin[1]) * scale);
-            
-            gridX = Math.max(0, Math.min(gridSize - 1, gridX));
-            gridY = Math.max(0, Math.min(gridSize - 1, gridY));
-            gridZ = Math.max(0, Math.min(gridSize - 1, gridZ));
             
             int color;
             if (useDefaultColor) {
@@ -203,8 +236,33 @@ public class VoxelDecoder {
                 color = (r << 16) | (g << 8) | b;
             }
             
+            minX = Math.min(minX, gridX);
+            minY = Math.min(minY, gridY);
+            minZ = Math.min(minZ, gridZ);
+            maxX = Math.max(maxX, gridX);
+            maxY = Math.max(maxY, gridY);
+            maxZ = Math.max(maxZ, gridZ);
+            
+            tempVoxels[validCount][0] = gridX;
+            tempVoxels[validCount][1] = gridY;
+            tempVoxels[validCount][2] = gridZ;
+            tempVoxels[validCount][3] = color;
+            validCount++;
+        }
+        
+        // Calculate centering offset
+        int offsetX = (gridSize - (maxX - minX + 1)) / 2 - minX;
+        int offsetY = (gridSize - (maxY - minY + 1)) / 2 - minY;
+        int offsetZ = (gridSize - (maxZ - minZ + 1)) / 2 - minZ;
+        
+        // Second pass: apply centering
+        for (int i = 0; i < validCount; i++) {
+            int gridX = Math.max(0, Math.min(gridSize - 1, tempVoxels[i][0] + offsetX));
+            int gridY = Math.max(0, Math.min(gridSize - 1, tempVoxels[i][1] + offsetY));
+            int gridZ = Math.max(0, Math.min(gridSize - 1, tempVoxels[i][2] + offsetZ));
+            
             BlockPos pos = new BlockPos(gridX, gridY, gridZ);
-            voxels.put(pos, color);
+            voxels.put(pos, tempVoxels[i][3]);
         }
         
         return new DecodeResult(voxels, voxelCount, boundsMin, boundsMax);
