@@ -44,6 +44,28 @@ A Fabric mod for Minecraft 1.21.1 that brings AI-powered 3D model generation dir
 
 Generation takes ~30 seconds using Z-Image + SAM-3D pipeline.
 
+### Stream Mode (Live Preview)
+
+Watch structures emerge from noise in real-time!
+
+```
+/fal stream <size> <prompt>
+```
+
+**Examples:**
+```
+/fal stream 64 dragon statue
+/fal stream 96 futuristic mech
+/fal stream 80 medieval castle
+```
+
+Stream mode shows the SAM-3D diffusion process live - you'll see the shape form first (geometry phase), then colors appear (appearance phase). Powered by [Manifold](https://github.com/rehan-remade/Manifold), a real-time 3D streaming pipeline built on [fal Serverless](https://fal.ai).
+
+**Controls:**
+- **G** - Rotate during preview
+- **Right-click** - Place when complete
+- `/fal stream cancel` - Cancel generation
+
 ### Legacy Mode (Meshy-6)
 
 For UV-textured models (~7 minutes):

@@ -165,8 +165,8 @@ public class RemixCommand {
             } catch (IllegalStateException e) {
                 // Handle missing API key
                 Minecraft.getInstance().execute(() ->
-                    source.sendError(Component.literal("§c[fal] Error: FAL_API_KEY not found in .env file!")));
-                LOGGER.error("FAL_API_KEY not set", e);
+                    source.sendError(Component.literal("§c[fal] Error: API key not configured. Use /fal setkey <key>")));
+                LOGGER.error("API key not configured", e);
             } catch (Exception e) {
                 String errorMsg = e.getMessage();
                 Minecraft.getInstance().execute(() ->

@@ -3,6 +3,7 @@ package com.falcraft;
 import com.falcraft.commands.ConfigCommand;
 import com.falcraft.commands.GenerateCommand;
 import com.falcraft.commands.RemixCommand;
+import com.falcraft.commands.StreamCommand;
 import com.falcraft.render.GhostBlockRenderer;
 import com.falcraft.util.PlacementPreview;
 import net.fabricmc.api.ClientModInitializer;
@@ -27,6 +28,7 @@ public class FalcraftClient implements ClientModInitializer {
             ConfigCommand.register(dispatcher);
             // RemixCommand.register(dispatcher);  // Coming in v1.1.0
             GenerateCommand.register(dispatcher);
+            StreamCommand.register(dispatcher);  // Streaming 3D generation
         });
         
         // Register ghost block renderer for placement preview
@@ -48,8 +50,35 @@ public class FalcraftClient implements ClientModInitializer {
                 PlacementPreview.tickAnimatedPlacement();
             }
             
+            // Tick noise animation during streaming - makes chaos ALIVE from the start!
+            if (PlacementPreview.isStreaming()) {
+                PlacementPreview.tickNoiseAnimation();
+            }
+            
             // Check if placement mode is active
             if (PlacementPreview.isPlacementActive()) {
+                // During streaming mode, only allow rotation and ESC to cancel
+                // Don't allow placement until streaming is complete
+                if (PlacementPreview.isStreaming()) {
+                    // Detect G key for rotation during streaming
+                    boolean isRotateKeyPressed = org.lwjgl.glfw.GLFW.glfwGetKey(
+                        Minecraft.getInstance().getWindow().getWindow(),
+                        org.lwjgl.glfw.GLFW.GLFW_KEY_G
+                    ) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
+                    
+                    if (isRotateKeyPressed && !wasRotateKeyPressed) {
+                        PlacementPreview.rotate();
+                        int degrees = PlacementPreview.getRotationIndex() * 90;
+                        client.player.displayClientMessage(
+                            Component.literal("§b[fal] Rotated to " + degrees + "°"),
+                            true
+                        );
+                    }
+                    wasRotateKeyPressed = isRotateKeyPressed;
+                    wasRightClickPressed = false;
+                    return;
+                }
+                
                 // Detect right-click (use attack button press)
                 boolean isRightClickPressed = client.options.keyUse.isDown();
                 
