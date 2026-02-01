@@ -98,10 +98,7 @@ public class StreamCommand {
             return 0;
         }
         
-        // Send initial feedback
-        source.sendFeedback(Component.literal("§b[fal] ✨ Starting streaming 3D generation..."));
-        source.sendFeedback(Component.literal("§b[fal] Prompt: \"" + prompt + "\""));
-        source.sendFeedback(Component.literal("§7[fal] Watch the structure emerge from noise!"));
+        // Silent start - progress shown in action bar
         
         // Start streaming preview mode
         Minecraft.getInstance().execute(() -> {
@@ -176,9 +173,7 @@ public class StreamCommand {
                     
                     @Override
                     public void onStatus(String message) {
-                        Minecraft.getInstance().execute(() -> {
-                            source.sendFeedback(Component.literal("§7[fal] " + message));
-                        });
+                        // Silent - progress shown in action bar only
                     }
                 });
                 
