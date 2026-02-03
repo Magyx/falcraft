@@ -73,10 +73,6 @@ For UV-textured models (~7 minutes):
 /fal generate legacy <size> <prompt>
 ```
 
-### Remix Block Textures *(Coming soon)*
-
-AI-powered texture remixing with undo/reset functionality - stay tuned!
-
 ## ⚙️ Setup Details
 
 1. Install [Fabric Loader](https://fabricmc.net/use/) + [Fabric API](https://modrinth.com/mod/fabric-api) for MC 1.21.1
