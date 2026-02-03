@@ -20,11 +20,16 @@ import java.util.Base64;
 
 public class FalAPI {
     private static final Logger LOGGER = LoggerFactory.getLogger("FalAPI");
-    private static final String FAL_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/nano-banana/edit";
-    private static final String FAL_3D_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/meshy/v6-preview/text-to-3d";
-    private static final String FAL_ZIMAGE_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/z-image/turbo";
-    private static final String FAL_SAM3_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/sam-3/3d-objects";
-    private static final String FAL_VLM_QUEUE_SUBMIT = "https://queue.fal.run/openrouter/router/vision";
+    //private static final String FAL_QUEUE_SUBMIT = "https:"http://loc"http://localhost:8000/nano-banana/edit"
+    //private static final String FAL_3D_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/meshy/v6-preview/text-to-3d";
+    //private static final String FAL_ZIMAGE_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/z-image/turbo";
+    //private static final String FAL_SAM3_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/sam-3/3d-objects";
+    //private static final String FAL_VLM_QUEUE_SUBMIT = "https://queue.fal.run/openrouter/router/vision";
+    private static final String FAL_QUEUE_SUBMIT = "http://localhost:8000/nano-banana/edit";
+    private static final String FAL_3D_QUEUE_SUBMIT = "http://localhost:8000/meshy/v6-preview/text-to-3d";
+    private static final String FAL_ZIMAGE_QUEUE_SUBMIT = "http://localhost:8000/z-image/turbo";
+    private static final String FAL_SAM3_QUEUE_SUBMIT = "http://localhost:8000/sam-3/3d-objects";
+    private static final String FAL_VLM_QUEUE_SUBMIT = "http://localhost:8000/openrouter/router/vision";
     private static final Gson GSON = new Gson();
     private final HttpClient httpClient;
     private final String apiKey;
@@ -36,12 +41,12 @@ public class FalAPI {
 
     public FalAPI() {
         this.httpClient = HttpClient.newHttpClient();
-        this.apiKey = ConfigCommand.getApiKey();
         
-        if (apiKey == null || apiKey.isEmpty()) {
-            LOGGER.error("FAL_API_KEY not found! Use /fal setkey <key> to configure.");
-            throw new IllegalStateException("API key not configured. Use /fal setkey <your-key> to set it up. Get a key at https://fal.ai/dashboard/keys");
-        }
+        
+              // When running against a local server we do not require an API key.
+        // If a key is configured (via /fal setkey) it will be attached to the Authorization header.
+        String configuredKey = ConfigCommand.getApiKey();
+        this.apiKey = configuredKey != null ? configuredKey : "";
     }
 
     /**
