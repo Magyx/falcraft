@@ -35,11 +35,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class SAM3DStreamAPI {
     private static final Logger LOGGER = LoggerFactory.getLogger("SAM3DStreamAPI");
     
-    // Use the custom streaming endpoint deployed by rehan
-    private static final String SAM3D_STREAM_ENDPOINT = "https://fal.run/rehan/sam-3d-stream/stream";
-    
+    // When running locally, point these endpoints at your own server.  The
+    // streaming endpoint should emit SSE events with geometry/appearance updates.
+    private static final String SAM3D_STREAM_ENDPOINT = "http://localhost:8000/sam3d-stream/stream";
+
     // Z-Image Turbo for initial image generation
-    private static final String FAL_ZIMAGE_QUEUE_SUBMIT = "https://queue.fal.run/fal-ai/z-image/turbo";
+    private static final String FAL_ZIMAGE_QUEUE_SUBMIT = "http://localhost:8000/z-image/turbo";
     
     private static final Gson GSON = new Gson();
     private final HttpClient httpClient;
@@ -83,12 +84,11 @@ public class SAM3DStreamAPI {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .build();
-        this.apiKey = ConfigCommand.getApiKey();
-        
-        if (apiKey == null || apiKey.isEmpty()) {
-            LOGGER.error("FAL_API_KEY not found! Use /fal setkey <key> to configure.");
-            throw new IllegalStateException("API key not configured. Use /fal setkey <your-key> to set it up.");
-        }
+        // When using a local server the API key is optional.  We still read
+        // whatever key has been configured for backwards compatibility but
+        // default to an empty string if none is provided.
+        String configuredKey = ConfigCommand.getApiKey();
+        this.apiKey = configuredKey != null ? configuredKey : "";
     }
     
     /**
